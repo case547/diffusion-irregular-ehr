@@ -1,0 +1,3 @@
+[submodule "DiffPO"]
+	path = DiffPO
+	url = https://github.com/yccm/DiffPO
