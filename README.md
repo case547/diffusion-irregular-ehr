@@ -1,1 +1,1 @@
-# diffusion-irregular-ehr
+# Causally-Consistent Diffusion Models for Irregular EHR Time Series and Counterfactual Trajectories
