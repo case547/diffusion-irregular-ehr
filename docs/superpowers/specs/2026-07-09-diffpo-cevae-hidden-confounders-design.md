@@ -1,0 +1,236 @@
+# DiffPO-CEVAE: Extending DiffPO to Handle Hidden Confounders
+
+**Date:** 2026-07-09
+**Status:** Draft
+
+---
+
+## Purpose
+
+DiffPO learns the full distribution of potential outcomes (POs) via a conditional diffusion model,
+offering uncertainty quantification beyond point estimates. However, DiffPO assumes
+**unconfoundedness** — that all confounders are observed in $\mathbf{x}$. This is rarely satisfied
+in observational medical data, where unmeasured variables (e.g. disease severity, patient
+behaviour) simultaneously influence treatment assignment and outcomes.
+
+CEVAE addresses hidden confounding by introducing a latent variable $\mathbf{z}$ representing the
+true confounder, but its outcome model is a simple Gaussian or Bernoulli — unable to capture
+complex distributional structure.
+
+This experiment proposes a hybrid: **CEVAE's latent confounder structure combined with DiffPO's
+distributional diffusion outcome model**, yielding a method that handles hidden confounders while
+learning the full PO distribution.
+
+---
+
+## Method
+
+### Training Objective
+
+The objective $\mathcal{F}$ is maximised jointly over parameters $(\phi, \psi, \theta)$:
+
+$$
+\mathcal{F} =
+  \sum_{i=1}^{N} \left[
+    \mathbb{E}_{\mathbf{z}_i \sim r_\phi(\mathbf{z}_i \mid \mathbf{x}_i, a_i, y_{i,0})}
+    \left[ \log p_\psi(\mathbf{x}_i \mid \mathbf{z}_i) + \log p_\psi(a_i \mid \mathbf{z}_i) \right]
+    - D_{\mathrm{KL}}\!\left(
+        r_\phi(\mathbf{z}_i \mid \mathbf{x}_i, a_i, y_{i,0}) \,\|\, p(\mathbf{z}_i)
+      \right)
+  \right]
+$$
+
+$$
+- \sum_{i=1}^{N} \mathbb{E}_{\substack{
+    \mathbf{z}_i \sim r_\phi(\mathbf{z}_i \mid \mathbf{x}_i, a_i, y_{i,0}) \\
+    \epsilon \sim \mathcal{N}(\mathbf{0}, \mathbf{I}) \\
+    \tau \sim \mathrm{Unif}\{1,\dots,L\}
+  }}
+  \left[ \left\| \epsilon - \epsilon_\theta(y_{i,\tau},\, \tau \mid \mathbf{z}_i, a_i) \right\|^2 \right]
++ \sum_{i=1}^{N} \left[
+    \log r_\phi(a_i \mid \mathbf{x}_i) + \log r_\phi(y_{i,0} \mid \mathbf{x}_i, a_i)
+  \right]
+$$
+
+where $y_{i,\tau} = \sqrt{\bar\alpha_\tau}\,y_{i,0} + \sqrt{1-\bar\alpha_\tau}\,\epsilon$ and
+$p(\mathbf{z}_i) = \mathcal{N}(\mathbf{0}, \mathbf{I})$.
+
+The three terms are:
+
+1. **VAE reconstruction + regularisation (from CEVAE):** pushes $\mathbf{z}$ to encode the
+   information in $(\mathbf{x}, a)$; the closed-form KL regularises toward the prior.
+2. **Noise-matching diffusion loss (from DiffPO):** replaces CEVAE's simple $\log p(y_{i,0} \mid
+   a_i, \mathbf{z}_i)$ Gaussian outcome model with a diffusion denoiser conditioned on $\mathbf{z}$
+   rather than $\mathbf{x}$.
+3. **Auxiliary prediction terms (from CEVAE):** trains $r_\phi(a \mid \mathbf{x})$ and
+   $r_\phi(y_0 \mid \mathbf{x}, a)$ so that the encoder can be used at test time without observed
+   $(a, y_0)$.
+
+### Architecture
+
+**Encoder** $r_\phi(\mathbf{z} \mid \mathbf{x}, a, y_0)$ — TARnet-split with shared base $g_1$
+and treatment-specific heads $g_2, g_3$:
+
+$$
+(\boldsymbol{\mu}_{a=0}, \boldsymbol{\sigma}^2_{a=0}) = g_2(g_1(\mathbf{x}, y_0)),
+\qquad
+(\boldsymbol{\mu}_{a=1}, \boldsymbol{\sigma}^2_{a=1}) = g_3(g_1(\mathbf{x}, y_0))
+$$
+
+$$
+\boldsymbol{\mu} = a\,\boldsymbol{\mu}_{a=1} + (1-a)\,\boldsymbol{\mu}_{a=0},
+\qquad
+\boldsymbol{\sigma}^2 = a\,\boldsymbol{\sigma}^2_{a=1} + (1-a)\,\boldsymbol{\sigma}^2_{a=0}
+$$
+
+At training, only the branch matching the observed $a_i$ is active and receives gradients;
+each head specialises to its treatment group. $g_1$ is updated by all patients.
+
+**Decoders** $p_\psi(\mathbf{x} \mid \mathbf{z})$, $p_\psi(a \mid \mathbf{z})$ — MLPs.
+Training-only; discarded at inference.
+
+**Diffusion denoiser** $\epsilon_\theta(y_\tau, \tau \mid \mathbf{z}, a)$ — U-Net with MLP
+residual blocks (following DiffPO), conditioned on $\mathbf{z}$ rather than $\mathbf{x}$.
+This is the key structural change from DiffPO.
+
+**Auxiliary networks** $r_\phi(a \mid \mathbf{x})$, $r_\phi(y_0 \mid \mathbf{x}, a)$ — MLPs.
+Trained jointly to supply missing inputs to the encoder at test time.
+
+### Training Procedure
+
+For each mini-batch $\{(\mathbf{x}_i, a_i, y_{i,0})\}_{i=1}^B$:
+
+1. **Encode:** compute $(\boldsymbol{\mu}_i, \boldsymbol{\sigma}^2_i)$ via TARnet-split encoder;
+   sample $\hat{\mathbf{z}}_i = \boldsymbol{\mu}_i + \boldsymbol{\sigma}_i \odot \boldsymbol{\eta}_i$,
+   $\boldsymbol{\eta}_i \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$ (reparameterisation trick).
+2. **VAE reconstruction:** compute $\log p_\psi(\mathbf{x}_i \mid \hat{\mathbf{z}}_i)$ and
+   $\log p_\psi(a_i \mid \hat{\mathbf{z}}_i)$.
+3. **KL regularisation:** compute in closed form
+   $D_{\mathrm{KL}} = \frac{1}{2}\sum_j \left(\mu_{ij}^2 + \sigma_{ij}^2 - \log\sigma_{ij}^2 - 1\right)$.
+4. **Diffusion forward:** sample $\tau \sim \mathrm{Unif}\{1,\dots,L\}$,
+   $\epsilon \sim \mathcal{N}(\mathbf{0},\mathbf{I})$; compute
+   $y_{i,\tau} = \sqrt{\bar\alpha_\tau}\,y_{i,0} + \sqrt{1-\bar\alpha_\tau}\,\epsilon$.
+5. **Noise prediction:** compute
+   $\|\epsilon - \epsilon_\theta(y_{i,\tau}, \tau \mid \hat{\mathbf{z}}_i, a_i)\|^2$.
+6. **Auxiliary:** compute $\log r_\phi(a_i \mid \mathbf{x}_i)$ and
+   $\log r_\phi(y_{i,0} \mid \mathbf{x}_i, a_i)$.
+7. **Update** $(\phi, \psi, \theta)$ by minimising $-\mathcal{F}$ via stochastic gradient descent.
+
+### Inference Procedure
+
+Given a new patient $\mathbf{x}^*$, produce $K$ samples of each PO:
+
+1. **Marginalise over $(a, y_0)$** to obtain $K$ patient-specific latent samples.
+   For $k = 1, \dots, K$:
+   1. Sample $\hat{a}^{(k)} \sim r_\phi(a \mid \mathbf{x}^*)$.
+   2. Sample $\hat{y}_0^{(k)} \sim r_\phi(y_0 \mid \mathbf{x}^*,\, \hat{a}^{(k)})$.
+   3. Sample $\hat{\mathbf{z}}^{(k)} \sim r_\phi(\mathbf{z} \mid \mathbf{x}^*,\, \hat{a}^{(k)},\, \hat{y}_0^{(k)})$.
+
+2. **Reverse diffusion** for each target treatment $a_{\mathrm{target}} \in \{0,1\}$,
+   for each $k = 1,\dots,K$:
+   1. Sample $y_L^{(k)} \sim \mathcal{N}(\mathbf{0},\mathbf{I})$.
+   2. For $\tau = L, L-1, \dots, 1$: compute
+      $$\mu_\theta\!\left(y_\tau^{(k)}, \tau \mid \hat{\mathbf{z}}^{(k)}, a_{\mathrm{target}}\right) = \frac{1}{\sqrt{\alpha_\tau}}\!\left(
+        y_\tau^{(k)} - \frac{\beta_\tau}{\sqrt{1-\bar\alpha_\tau}}\,
+        \epsilon_\theta\!\left(y_\tau^{(k)},\, \tau \mid \hat{\mathbf{z}}^{(k)},\, a_{\mathrm{target}}\right)
+      \right)$$
+      then sample $y_{\tau-1}^{(k)} = \mu_\theta\!\left(y_\tau^{(k)}, \tau \mid \hat{\mathbf{z}}^{(k)}, a_{\mathrm{target}}\right) + \sigma_\tau \boldsymbol{\xi}$,
+      $\boldsymbol{\xi} \sim \mathcal{N}(\mathbf{0},\mathbf{I})$.
+
+3. **Output:** $\{\tilde{y}_0^{(k)}(0)\}_{k=1}^K$ and $\{\tilde{y}_0^{(k)}(1)\}_{k=1}^K$ are
+   samples from $p(Y(0) \mid X=\mathbf{x}^*)$ and $p(Y(1) \mid X=\mathbf{x}^*)$ respectively,
+   from which point estimates, predictive intervals, Wasserstein distances, and CATE estimates
+   can be derived.
+
+### Dataset
+
+TBD. Key candidates:
+
+- **IHDP** — used by both DiffPO and CEVAE; 747 patients, 25 features, semi-synthetic outcomes
+  with 1000 replications. Enables direct comparison against published baselines from both papers.
+- **Twins** — CEVAE's purpose-built hidden confounder benchmark; real covariates, treatment
+  assigned based on a withheld variable (gestation weeks), with controlled proxy noise levels.
+  Most directly tests the hidden confounder extension.
+
+---
+
+## Considered and Abandoned Approaches
+
+### Simple concatenation encoder
+
+Concatenating $(\mathbf{x}, a, y_0)$ into a single MLP ignores the structural difference between
+treatment groups. The TARnet split is better motivated: treatment assignment is confounded with
+$\mathbf{z}$, so the posterior over $\mathbf{z}$ may genuinely differ between treated and control
+patients. Abandoned in favour of the TARnet-split encoder.
+
+### Normalizing flow encoder
+
+Replacing the diagonal Gaussian with a flow-based posterior allows richer, potentially multimodal
+posteriors over $\mathbf{z}$. Abandoned for the initial experiment — the Gaussian approximation is
+standard in CEVAE and sufficient to establish whether the hybrid works at all. A natural extension
+if the Gaussian family proves too restrictive.
+
+### Providing $a$ at inference (DiffPO convention)
+
+Specifying the target treatment $a$ directly to the encoder at test time avoids the need for the
+auxiliary $r_\phi(a \mid \mathbf{x})$. However, the auxiliary outcome predictor
+$r_\phi(y_0 \mid \mathbf{x}, a)$ must then extrapolate to the counterfactual $a$ with full weight
+on a biased prediction. CEVAE-style marginalisation is preferable: the propensity weighting
+$r_\phi(a \mid \mathbf{x})$ naturally down-weights the counterfactual contribution to
+$\hat{\mathbf{z}}$, reducing — though not eliminating — this bias.
+
+### Two-stage inference
+
+Training a separate outcome model to produce $\hat{y}_0$ for the encoder (rather than training
+$r_\phi(y_0 \mid \mathbf{x}, a)$ jointly within $\mathcal{F}$) introduces selection bias into
+$\hat{y}_0$, which propagates into $\hat{\mathbf{z}}$. Joint training within the ELBO partially
+corrects this through shared gradient pressure. Abandoned.
+
+### IPW reweighting in $\mathbf{z}$-space
+
+Replacing DiffPO's $\pi(\mathbf{x})$-based orthogonal loss with $\pi(\hat{\mathbf{z}})$-based
+reweighting is theoretically motivated — unconfoundedness holds at the $\mathbf{z}$ level, not
+the $\mathbf{x}$ level, so $\pi(\mathbf{z})$ is the correct propensity for IPW correction.
+However, estimating propensity scores from noisy encoder samples $\hat{\mathbf{z}}$ creates a
+circular dependency early in training (poor $\hat{\mathbf{z}}$ → poor $\hat\pi$ → poor
+reweighting → poor $\hat{\mathbf{z}}$); $\hat{\mathbf{z}}$ is sampled, not observed, so
+propensity estimates are noisier than in DiffPO; and DiffPO's Neyman-orthogonality proof does
+not directly carry over to the latent setting. Left as a natural future extension.
+
+---
+
+## Limitations
+
+1. **Auxiliary predictor bias.** The auxiliary outcome network $r_\phi(y_0 \mid \mathbf{x}, a)$
+   is trained on observational data without IPW correction. Even with propensity-weighted
+   marginalisation at inference, its counterfactual predictions remain biased, propagating error
+   into $\hat{\mathbf{z}}$ and thus into the diffusion model.
+
+2. **No orthogonal loss.** DiffPO's Neyman-orthogonal reweighting of the diffusion loss is not
+   carried over, because unconfoundedness does not hold at the $\mathbf{x}$ level under hidden
+   confounding. The causal adjustment relies entirely on the encoder recovering $\mathbf{z}$. If
+   $\mathbf{z}$ is poorly estimated, confounding bias is not corrected and there is no
+   first-order robustness guarantee.
+
+3. **Non-identifiability of $\mathbf{z}$.** The latent confounder is not uniquely identified from
+   observational data. Different $\mathbf{z}$ configurations may explain the observed
+   $(\mathbf{x}, a, y_0)$ triples equally well. The model relies on the structural assumptions of
+   the causal graph and the inductive bias of the encoder architecture to recover a useful
+   $\mathbf{z}$.
+
+4. **Unverifiable core assumption.** The central assumption $Y(a) \perp A \mid \mathbf{Z}$ cannot be
+   tested from data. If the true causal graph differs — e.g. additional hidden confounders exist
+   beyond those captured by $\mathbf{z}$ — the model produces biased PO estimates with no
+   observable signal of failure.
+
+5. **Gaussian variational family.** The diagonal Gaussian posterior may be too restrictive if the
+   true posterior over $\mathbf{z}$ is multimodal or has strong inter-dimensional correlations.
+   Misspecification of the variational family degrades the quality of inferred $\mathbf{z}$,
+   propagating into the diffusion model.
+
+6. **Causality or correlation.** The encoder is trained to maximise the ELBO — a generative
+   objective that rewards explaining the observed joint distribution $p(\mathbf{x}, a, y_0)$.
+   There is no causal supervision signal, so $\mathbf{z}$ may capture a statistical proxy that
+   reproduces the correlations in the data without corresponding to the true hidden confounder.
+   This is distinct from non-identifiability (limitation 3): even if $\mathbf{z}$ were uniquely
+   determined by the data, it need not be causally interpretable.
