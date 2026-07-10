@@ -17,6 +17,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "basedpyright>=1.39.9",
+    "pytest>=9.1.1",
     "ruff>=0.15.20",
 ]
 
@@ -32,3 +33,6 @@ torch = [
 torchvision = [
   { index = "pytorch-cu130", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
+
+[tool.ruff]
+exclude = ["DiffPO"]
