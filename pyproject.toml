@@ -5,15 +5,19 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "matplotlib>=3.11.0",
+    "pandas>=3.0.3",
     "pyro-ppl>=1.9.1",
-    "ruff>=0.15.20",
+    "scikit-learn>=1.9.0",
     "torch>=2.12.1",
     "torchvision>=0.27.1",
+    "wandb>=0.28.0",
 ]
 
 [dependency-groups]
 dev = [
     "basedpyright>=1.39.9",
+    "ruff>=0.15.20",
 ]
 
 [[tool.uv.index]]
