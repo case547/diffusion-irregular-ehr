@@ -30,6 +30,12 @@ jobs:
         if: always()
         run: uv run pytest
 
+      - name: 📑 Sort Imports
+        if: always()
+        uses: isort/isort-action@v1
+        with:
+          isort-version: "~=8.0"
+
       - name: 👮 PR Conventional Commit Validation
         if: always()
         uses: ytanikin/pr-conventional-commits@1.5.2
