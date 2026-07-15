@@ -142,19 +142,63 @@ Given a new patient $\mathbf{x}^*$, produce $K$ samples of each PO:
    from which point estimates, predictive intervals, Wasserstein distances, and CATE estimates
    can be derived.
 
-### Dataset
+### Dataset and Experimental Structure
 
-TBD. Key candidates:
+**Dataset: IHDP.** 747 patients, 25 features (6 continuous, 19 binary), binary treatment. Real
+covariates and treatment assignments from a clinical trial; synthetic potential outcomes under
+the standard "Response Surface B" setting. Used quantitatively by CEVAE and qualitatively by
+DiffPO, making it the natural common ground for the hybrid.
 
-- **IHDP** — used by both DiffPO and CEVAE; 747 patients, 25 features, semi-synthetic outcomes
-  with 1000 replications. Enables direct comparison against published baselines from both papers.
-- **Twins** — CEVAE's purpose-built hidden confounder benchmark; real covariates, treatment
-  assigned based on a withheld variable (gestation weeks), with controlled proxy noise levels.
-  Most directly tests the hidden confounder extension.
+**Experimental structure: 2×2.** Method (DiffPO vs. DiffPO-CEVAE) crossed with data condition
+(full covariates vs. hidden confounder):
+
+- **Full covariates** — both methods trained on the standard 25 NPCI covariates (x1–x25) with
+  original treatment assignments. Directly comparable to published CEVAE and DiffPO baselines.
+  Establishes that DiffPO-CEVAE does not degrade when hidden confounding is absent; the latent
+  z collapses toward the prior and the model approximately reduces to DiffPO.
+- **Hidden confounder** — both methods trained on the same 25 covariates with original
+  treatment flipped for all patients with momblack=1 (see below). Tests the central hypothesis:
+  DiffPO degrades, DiffPO-CEVAE partially recovers. Training covariates are identical across
+  both conditions; only the treatment column differs.
+
+**Introducing confounding.** The `momblack` indicator (mother is Black) is obtained from Hill's
+`sim.data` R object and is not present in the standard NPCI covariate set x1–x25. For patients
+with momblack=1, treatment is flipped: $a_i \leftarrow 1 - a_i$. Factual outcomes $y_{i,0}$ and
+ground-truth $\mu_0$, $\mu_1$ are left unchanged. momblack is not present in x1–x25, so neither
+model observes it directly. However, race may be partiallyrecoverable from proxy variables already
+in x — site indicators and maternal education covariates correlate with momblack — meaning DiffPO
+can indirectly account for some of the confounding through these proxies. DiffPO-CEVAE's latent z
+provides a more principled mechanism for absorbing the residual confounding that x cannot capture.
+The expected performance gap between methods is therefore moderate rather than dramatic, which
+reflects realistic EHR settings where a hidden variable typically has some observable correlates.
+
+This mechanism is treatment label corruption rather than classical latent-variable confounding
+(where z causally generates both a and y). It is a realistic proxy for a demographic variable
+absent from the EHR that systematically affected treatment allocation.
+
+**Metrics:** √PEHE (primary causal accuracy), 95% predictive interval coverage (calibration),
+Wasserstein-1 distance (distributional fit).
 
 ---
 
 ## Considered and Abandoned Approaches
+
+### ACIC2018 as the benchmark dataset
+
+ACIC2018 is DiffPO's primary quantitative benchmark. Using it would allow citing DiffPO's
+published √PEHE numbers directly for the full-covariates DiffPO condition (one cell of the
+2×2 obtained for free) and running DiffPO's existing codebase on the confounded dataset for
+the confounded DiffPO condition (no reimplementation of DiffPO needed). The dissertation
+framing as "DiffPO with latent estimation" is also arguably more natural when evaluated on
+the dataset DiffPO was designed for. With anonymised covariates a correlation-based confounding
+mechanism (flip treatment for the group defined by the binary column most correlated with
+treatment) is mathematically valid even without a real-world narrative.
+
+IHDP was preferred because momblack provides a principled, interpretable confounding mechanism
+with a real-world motivation (a demographic variable absent from the EHR), and because CEVAE's
+published IHDP numbers provide a natural reference for the full-covariates DiffPO-CEVAE
+condition. ACIC2018 remains the stronger choice if the dissertation is reframed around
+extending DiffPO rather than combining DiffPO with CEVAE.
 
 ### Simple concatenation encoder
 
