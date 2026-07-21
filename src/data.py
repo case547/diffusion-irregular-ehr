@@ -91,7 +91,7 @@ def make_ihdp_confounded(ds: CausalDataset) -> CausalDataset:
     y_cf = ds.y_cf.numpy() if ds.y_cf is not None else None
     mu0 = ds.mu0.numpy() if ds.mu0 is not None else None
     mu1 = ds.mu1.numpy() if ds.mu1 is not None else None
-    return CausalDataset(ds.x.numpy(), a, ds.y.numpy(), y_cf, mu0, mu1, ds.confounder)
+    return CausalDataset(ds.x.numpy(), a, ds.y.numpy(), y_cf, mu0, mu1, ds.confounder.copy())
 
 
 def load_acic(data_dir: str, sheet_id: str, split_seed: int = 1, train_ratio: float = 0.7, test_ratio: float = 0.15):
@@ -151,4 +151,4 @@ def make_acic_confounded(ds: CausalDataset) -> CausalDataset:
     y_cf = ds.y_cf.numpy() if ds.y_cf is not None else None
     mu0 = ds.mu0.numpy() if ds.mu0 is not None else None
     mu1 = ds.mu1.numpy() if ds.mu1 is not None else None
-    return CausalDataset(ds.x.numpy(), a, ds.y.numpy(), y_cf, mu0, mu1, ds.confounder)
+    return CausalDataset(ds.x.numpy(), a, ds.y.numpy(), y_cf, mu0, mu1, ds.confounder.copy())
