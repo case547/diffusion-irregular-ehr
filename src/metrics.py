@@ -10,15 +10,19 @@ def wasserstein(
     mu1: torch.Tensor,
 ) -> tuple[float, float]:
     """
-    Mean per-subject 1-Wasserstein distance between K predictive samples and point mass at true PO.
+    Mean per-subject 1-Wasserstein distance between K predictive samples & true PO point mass.
     Returns (wd_y0, wd_y1).
     """
     y0_np = y0.cpu().numpy()
     y1_np = y1.cpu().numpy()
     mu0_np = mu0.cpu().numpy()
     mu1_np = mu1.cpu().numpy()
-    wd0 = float(np.mean([wasserstein_distance(y0_np[i], [mu0_np[i]]) for i in range(len(mu0_np))]))
-    wd1 = float(np.mean([wasserstein_distance(y1_np[i], [mu1_np[i]]) for i in range(len(mu1_np))]))
+    wd0 = float(
+        np.mean([wasserstein_distance(y0_np[i], [mu0_np[i]]) for i in range(len(mu0_np))])
+    )
+    wd1 = float(
+        np.mean([wasserstein_distance(y1_np[i], [mu1_np[i]]) for i in range(len(mu1_np))])
+    )
     return wd0, wd1
 
 

@@ -1,5 +1,6 @@
 import torch
-from src.metrics import wasserstein, coverage, rmse, pehe
+
+from src.metrics import coverage, pehe, rmse, wasserstein
 
 B, K = 20, 100
 
