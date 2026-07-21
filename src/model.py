@@ -1,3 +1,5 @@
+from abc import abstractmethod
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -14,6 +16,24 @@ class _DiffusionBase(nn.Module):
     """Shared noise schedule and DDPM helpers for DiffPOCEVAE and DiffPO."""
 
     denoiser: Denoiser
+
+    @abstractmethod
+    def compute_loss(
+        self,
+        x: torch.Tensor,
+        a: torch.Tensor,
+        y_fac: torch.Tensor,
+        y_cf: torch.Tensor,
+        propnet: PropensityNet | None = None,
+    ) -> dict[str, torch.Tensor]: ...
+
+    @abstractmethod
+    def total_loss(self, components: dict[str, torch.Tensor]) -> torch.Tensor: ...
+
+    @abstractmethod
+    def sample_outcomes(
+        self, x: torch.Tensor, a: torch.Tensor, K: int = 50
+    ) -> tuple[torch.Tensor, torch.Tensor]: ...
 
     def _init_schedule(self, d: DiffusionConfig) -> None:
         L = d.num_steps
