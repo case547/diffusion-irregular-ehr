@@ -1,11 +1,18 @@
 import torch
-from src.config import ModelConfig, DiffusionConfig
+
+from src.config import DiffusionConfig, ModelConfig
 from src.model import DiffPOCEVAE
 
 MODEL_CFG = ModelConfig(feature_dim=5, latent_dim=4, hidden_dim=16, num_layers=2)
 DIFF_CFG = DiffusionConfig(
-    num_steps=10, beta_start=0.0001, beta_end=0.02,
-    schedule="quad", embedding_dim=16, block_dim=16, hidden_dim=32, num_blocks=2,
+    num_steps=10,
+    beta_start=0.0001,
+    beta_end=0.02,
+    schedule="quad",
+    embedding_dim=16,
+    block_dim=16,
+    hidden_dim=32,
+    num_blocks=2,
 )
 B, F = 4, 5
 
@@ -17,7 +24,14 @@ def _batch():
 def test_loss_component_keys_and_shapes():
     model = DiffPOCEVAE(MODEL_CFG, DIFF_CFG)
     comps = model.compute_loss(*_batch())
-    assert set(comps.keys()) == {"log_px", "log_pa", "kl", "diffusion_loss", "log_qa", "log_qy"}
+    assert set(comps.keys()) == {
+        "log_px",
+        "log_pa",
+        "kl",
+        "diffusion_loss",
+        "log_qa",
+        "log_qy",
+    }
     for k, v in comps.items():
         assert v.shape == (), f"{k} not scalar"
 
