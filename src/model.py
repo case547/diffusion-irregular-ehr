@@ -7,6 +7,7 @@ from src.config import DiffusionConfig, ModelConfig
 from src.decoders import ADecoder, XDecoder
 from src.denoiser import Denoiser
 from src.encoder import ZEncoder
+from src.propensity import PropensityNet
 
 
 class _DiffusionBase(nn.Module):
@@ -150,4 +151,68 @@ class DiffPOCEVAE(_DiffusionBase):
         y_hat = self.aux_outcome.sample(x_rep, a_rep)
         z, _, _ = self.encoder.rsample(x_rep, a_rep, y_hat)
         y = self._ddpm_reverse(BK, z, a_rep, device).reshape(B, K, 2)
+        return y[:, :, 0], y[:, :, 1]
+
+
+class DiffPO(_DiffusionBase):
+    """
+    DiffPO baseline: diffusion PO model conditioned directly on x.
+
+    Reimplemented using our stack for a fair comparison with DiffPOCEVAE.
+    Conditioning: [a, x] via Denoiser(latent_dim=feature_dim).
+    Optional IPW weighting via a pre-trained frozen PropensityNet.
+    """
+
+    def __init__(self, model_cfg: ModelConfig, diffusion_cfg: DiffusionConfig):
+        super().__init__()
+        m = model_cfg
+        self.denoiser = Denoiser(
+            latent_dim=m.feature_dim,  # cond_proj takes [a, x]: size feature_dim+1
+            block_dim=diffusion_cfg.block_dim,
+            hidden_dim=diffusion_cfg.hidden_dim,
+            embedding_dim=diffusion_cfg.embedding_dim,
+            num_blocks=diffusion_cfg.num_blocks,
+            num_steps=diffusion_cfg.num_steps,
+        )
+        self._init_schedule(diffusion_cfg)
+
+    def compute_loss(
+        self,
+        x: torch.Tensor,
+        a: torch.Tensor,
+        y_fac: torch.Tensor,
+        y_cf: torch.Tensor,
+        propnet: PropensityNet | None = None,
+    ) -> dict[str, torch.Tensor]:
+        noisy_y, tau, eps, factual_mask = self._noise_targets(x, a, y_fac, y_cf)
+
+        eps_pred: torch.Tensor = self.denoiser(noisy_y, tau, x, a)
+        per_sample: torch.Tensor = (((eps_pred - eps) * factual_mask) ** 2).sum(
+            dim=1
+        ) / factual_mask.sum(dim=1)
+
+        if propnet is not None:
+            with torch.no_grad():
+                ipw = propnet.get_importance_weights(x, a)
+            ipw = ipw.clamp(0.5, 3.0)
+            ipw = ipw / ipw.mean()
+            diffusion_loss = (per_sample * ipw).mean()
+        else:
+            diffusion_loss = per_sample.mean()
+
+        return {"diffusion_loss": diffusion_loss}
+
+    def total_loss(self, components: dict[str, torch.Tensor]) -> torch.Tensor:
+        return components["diffusion_loss"]
+
+    @torch.no_grad()
+    def sample_outcomes(
+        self, x: torch.Tensor, a: torch.Tensor, K: int = 50
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Generate K PO samples per subject. Returns y0 (B,K), y1 (B,K)."""
+        B, device = x.shape[0], x.device
+        BK = B * K
+        x_rep = x.repeat_interleave(K, dim=0)
+        a_rep = a.repeat_interleave(K, dim=0)
+        y = self._ddpm_reverse(BK, x_rep, a_rep, device).reshape(B, K, 2)
         return y[:, :, 0], y[:, :, 1]

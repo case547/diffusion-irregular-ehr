@@ -131,12 +131,12 @@ class PropensityNet(nn.Module):
     def loss(self, y_pred: torch.Tensor, y_target: torch.Tensor) -> torch.Tensor:
         return nn.NLLLoss()(torch.log(y_pred + EPS), y_target.to(self.device))
 
-    def get_importance_weights(self, X: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
-        """IPW weights: w/p + (1-w)/(1-p) where p = P(a=1|x). Shape (B,)."""
+    def get_importance_weights(self, X: torch.Tensor, a: torch.Tensor) -> torch.Tensor:
+        """IPW weights: a/p + (1-a)/(1-p) where p = P(a=1|x). Shape (B,)."""
         with torch.no_grad():
-            p = self.forward(X)[:, 1]
-        w = w.to(self.device)
-        return w / (p + EPS) + (1 - w) / (1 - p + EPS)
+            p = self.forward(X)[:, 1].clamp(0.05, 0.95)
+        a = a.to(self.device)
+        return a / p + (1 - a) / (1 - p)
 
     def fit(
         self, X: torch.Tensor, y: torch.Tensor, wandb_run: Run | None = None
