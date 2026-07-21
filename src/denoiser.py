@@ -1,4 +1,5 @@
 import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -10,8 +11,10 @@ class MLP(nn.Module):
     def __init__(self, in_dim: int, hidden_dim: int, out_dim: int):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(in_dim, hidden_dim), nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
+            nn.Linear(in_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
             nn.Linear(hidden_dim, out_dim),
         )
 
@@ -34,7 +37,9 @@ class DiffusionEmbedding(nn.Module):
 
     def _build_embedding(self, num_steps: int, half_dim: int) -> torch.Tensor:
         steps = torch.arange(num_steps).unsqueeze(1).float()
-        freqs = 10.0 ** (torch.arange(half_dim).float() / (half_dim - 1) * 4.0).unsqueeze(0)
+        freqs = 10.0 ** (
+            torch.arange(half_dim).float() / max(half_dim - 1, 1) * 4.0
+        ).unsqueeze(0)
         table = steps * freqs
         return torch.cat([torch.sin(table), torch.cos(table)], dim=1)
 
@@ -91,7 +96,9 @@ class Denoiser(nn.Module):
         self.num_blocks = num_blocks
         self.cond_proj = nn.Linear(latent_dim + 1, block_dim)  # projects [a, z]
         self.mapping_noise = nn.Linear(2, block_dim)
-        self.diffusion_embedding = DiffusionEmbedding(num_steps=num_steps, embedding_dim=embedding_dim)
+        self.diffusion_embedding = DiffusionEmbedding(
+            num_steps=num_steps, embedding_dim=embedding_dim
+        )
         self.residual_layers = nn.ModuleList(
             [ResidualBlock(block_dim, embedding_dim) for _ in range(num_blocks)]
         )
@@ -111,7 +118,7 @@ class Denoiser(nn.Module):
         a: torch.Tensor,
     ) -> torch.Tensor:
         """noisy_y: (B,2), tau: (B,) long, z: (B, latent_dim), a: (B,) -> (B,2)"""
-        cond = torch.cat([a.unsqueeze(-1), z], dim=-1)            # [B, latent_dim+1]
+        cond = torch.cat([a.unsqueeze(-1), z], dim=-1)  # [B, latent_dim+1]
         h = F.relu(self.cond_proj(cond) + self.mapping_noise(noisy_y))  # [B, block_dim]
         diff_emb = self.diffusion_embedding(tau)
         skips = []
@@ -119,8 +126,8 @@ class Denoiser(nn.Module):
             h, skip = layer(h, diff_emb)
             skips.append(skip)
         h = torch.stack(skips).sum(dim=0) / math.sqrt(self.num_blocks)  # [B, block_dim]
-        h = F.relu(self.output_projection1(h))                # [B, hidden_dim]
-        h = F.relu(self.output_projection2(h))                # [B, hidden_dim]
-        y0 = self.output_y0(F.relu(self.y0_layer(h)))        # [B, 1]
-        y1 = self.output_y1(F.relu(self.y1_layer(h)))        # [B, 1]
+        h = F.relu(self.output_projection1(h))  # [B, hidden_dim]
+        h = F.relu(self.output_projection2(h))  # [B, hidden_dim]
+        y0 = self.output_y0(F.relu(self.y0_layer(h)))  # [B, 1]
+        y1 = self.output_y1(F.relu(self.y1_layer(h)))  # [B, 1]
         return torch.cat([y0, y1], dim=1)
