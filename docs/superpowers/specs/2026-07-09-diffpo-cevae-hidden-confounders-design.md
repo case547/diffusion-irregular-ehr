@@ -118,62 +118,72 @@ For each mini-batch $\{(\mathbf{x}_i, a_i, y_{i,0})\}_{i=1}^B$:
 
 ### Inference Procedure
 
-Given a new patient $\mathbf{x}^*$, produce $K$ samples of each PO:
+Given a patient $(\mathbf{x}^*, a^*)$ with observed covariates and treatment, produce $K$ samples
+of each PO (matching DiffPO's convention of conditioning on observed $a$):
 
-1. **Marginalise over $(a, y_0)$** to obtain $K$ patient-specific latent samples.
+1. **Obtain $K$ patient-specific latent samples.**
    For $k = 1, \dots, K$:
-   1. Sample $\hat{a}^{(k)} \sim r_\phi(a \mid \mathbf{x}^*)$.
-   2. Sample $\hat{y}_0^{(k)} \sim r_\phi(y_0 \mid \mathbf{x}^*,\, \hat{a}^{(k)})$.
-   3. Sample $\hat{\mathbf{z}}^{(k)} \sim r_\phi(\mathbf{z} \mid \mathbf{x}^*,\, \hat{a}^{(k)},\, \hat{y}_0^{(k)})$.
+   1. Sample $\hat{y}^{(k)} \sim r_\phi(y \mid \mathbf{x}^*,\, a^*)$ — impute the unobserved outcome via the auxiliary network.
+   2. Sample $\hat{\mathbf{z}}^{(k)} \sim r_\phi(\mathbf{z} \mid \mathbf{x}^*,\, a^*,\, \hat{y}^{(k)})$.
 
-2. **Reverse diffusion** for each target treatment $a_{\mathrm{target}} \in \{0,1\}$,
-   for each $k = 1,\dots,K$:
-   1. Sample $y_L^{(k)} \sim \mathcal{N}(\mathbf{0},\mathbf{I})$.
+2. **Reverse diffusion** for each $k = 1,\dots,K$:
+   1. Sample $y_L^{(k)} \sim \mathcal{N}(\mathbf{0},\mathbf{I})$ — pure noise in $\mathbb{R}^2$ (both PO slots).
    2. For $\tau = L, L-1, \dots, 1$: compute
-      $$\mu_\theta\!\left(y_\tau^{(k)}, \tau \mid \hat{\mathbf{z}}^{(k)}, a_{\mathrm{target}}\right) = \frac{1}{\sqrt{\alpha_\tau}}\!\left(
+      $$\mu_\theta\!\left(y_\tau^{(k)}, \tau \mid \hat{\mathbf{z}}^{(k)}, a^*\right) = \frac{1}{\sqrt{\alpha_\tau}}\!\left(
         y_\tau^{(k)} - \frac{\beta_\tau}{\sqrt{1-\bar\alpha_\tau}}\,
-        \epsilon_\theta\!\left(y_\tau^{(k)},\, \tau \mid \hat{\mathbf{z}}^{(k)},\, a_{\mathrm{target}}\right)
+        \epsilon_\theta\!\left(y_\tau^{(k)},\, \tau \mid \hat{\mathbf{z}}^{(k)},\, a^*\right)
       \right)$$
-      then sample $y_{\tau-1}^{(k)} = \mu_\theta\!\left(y_\tau^{(k)}, \tau \mid \hat{\mathbf{z}}^{(k)}, a_{\mathrm{target}}\right) + \sigma_\tau \boldsymbol{\xi}$,
+      then sample $y_{\tau-1}^{(k)} = \mu_\theta + \sigma_\tau \boldsymbol{\xi}$,
       $\boldsymbol{\xi} \sim \mathcal{N}(\mathbf{0},\mathbf{I})$.
 
-3. **Output:** $\{\tilde{y}_0^{(k)}(0)\}_{k=1}^K$ and $\{\tilde{y}_0^{(k)}(1)\}_{k=1}^K$ are
-   samples from $p(Y(0) \mid X=\mathbf{x}^*)$ and $p(Y(1) \mid X=\mathbf{x}^*)$ respectively,
-   from which point estimates, predictive intervals, Wasserstein distances, and CATE estimates
-   can be derived.
+3. **Output:** the two slots of $y_0^{(k)}$ give samples from $p(Y(0) \mid \mathbf{x}^*, a^*)$
+   and $p(Y(1) \mid \mathbf{x}^*, a^*)$ respectively, from which point estimates, predictive
+   intervals, Wasserstein distances, and CATE estimates can be derived.
 
-### Dataset and Experimental Structure
+### Datasets and Experimental Structure
 
-**Dataset: IHDP.** 747 patients, 25 features (6 continuous, 19 binary), binary treatment. Real
-covariates and treatment assignments from a clinical trial; synthetic potential outcomes under
+**Primary dataset: IHDP.** 747 patients, 25 features (6 continuous, 19 binary), binary treatment.
+Real covariates and treatment assignments from a clinical trial; synthetic potential outcomes under
 the standard "Response Surface B" setting. Used quantitatively by CEVAE and qualitatively by
 DiffPO, making it the natural common ground for the hybrid.
+
+**Secondary dataset: ACIC2018.** ~4,000 subjects, 177 anonymised covariates, binary treatment,
+continuous outcomes. DiffPO's primary quantitative benchmark. Evaluating on ACIC2018 allows
+direct comparison against DiffPO's published √PEHE numbers for the full-covariates condition and
+tests whether the hybrid generalises beyond IHDP.
 
 **Experimental structure: 2×2.** Method (DiffPO vs. DiffPO-CEVAE) crossed with data condition
 (full covariates vs. hidden confounder):
 
-- **Full covariates** — both methods trained on the standard 25 NPCI covariates (x1–x25) with
-  original treatment assignments. Directly comparable to published CEVAE and DiffPO baselines.
+- **Full covariates** — both methods trained on the standard covariates with original treatment
+  assignments. Directly comparable to published CEVAE (IHDP) and DiffPO (ACIC2018) baselines.
   Establishes that DiffPO-CEVAE does not degrade when hidden confounding is absent; the latent
   z collapses toward the prior and the model approximately reduces to DiffPO.
-- **Hidden confounder** — both methods trained on the same 25 covariates with original
-  treatment flipped for all patients with momblack=1 (see below). Tests the central hypothesis:
-  DiffPO degrades, DiffPO-CEVAE partially recovers. Training covariates are identical across
-  both conditions; only the treatment column differs.
+- **Hidden confounder** — both methods trained on the same covariates with a treatment column
+  corrupted by a hidden variable (see below). Tests the central hypothesis: DiffPO degrades,
+  DiffPO-CEVAE partially recovers. Training covariates are identical across both conditions;
+  only the treatment column differs.
 
-**Introducing confounding.** The `momblack` indicator (mother is Black) is obtained from Hill's
-`sim.data` R object and is not present in the standard NPCI covariate set x1–x25. For patients
-with momblack=1, treatment is flipped: $a_i \leftarrow 1 - a_i$. Factual outcomes $y_{i,0}$ and
-ground-truth $\mu_0$, $\mu_1$ are left unchanged. momblack is not present in x1–x25, so neither
-model observes it directly. However, race may be partiallyrecoverable from proxy variables already
-in x — site indicators and maternal education covariates correlate with momblack — meaning DiffPO
-can indirectly account for some of the confounding through these proxies. DiffPO-CEVAE's latent z
-provides a more principled mechanism for absorbing the residual confounding that x cannot capture.
-The expected performance gap between methods is therefore moderate rather than dramatic, which
-reflects realistic EHR settings where a hidden variable typically has some observable correlates.
+**Introducing confounding on IHDP.** The `momblack` indicator (mother is Black) is obtained from
+Hill's `sim.data` R object and is not present in the standard NPCI covariate set x1–x25. For
+patients with momblack=1, treatment is flipped: $a_i \leftarrow 1 - a_i$. Factual outcomes
+$y_{i,0}$ and ground-truth $\mu_0$, $\mu_1$ are left unchanged. momblack is not present in
+x1–x25, so neither model observes it directly. However, race may be partially recoverable from
+proxy variables already in x — site indicators and maternal education covariates correlate with
+momblack — meaning DiffPO can indirectly account for some of the confounding through these
+proxies. DiffPO-CEVAE's latent z provides a more principled mechanism for absorbing the residual
+confounding that x cannot capture. The expected performance gap between methods is therefore
+moderate rather than dramatic, which reflects realistic EHR settings where a hidden variable
+typically has some observable correlates.
 
-This mechanism is treatment label corruption rather than classical latent-variable confounding
-(where z causally generates both a and y). It is a realistic proxy for a demographic variable
+**Introducing confounding on ACIC2018.** With anonymised covariates there is no interpretable
+demographic variable to withhold. A correlation-based mechanism is used instead: identify the
+binary covariate most correlated with treatment assignment in each replicate, then flip treatment
+for all subjects where that covariate equals 1. This is mathematically equivalent to the IHDP
+mechanism and sufficient to test the hypothesis.
+
+Both mechanisms are treatment label corruption rather than classical latent-variable confounding
+(where z causally generates both a and y). They are realistic proxies for a demographic variable
 absent from the EHR that systematically affected treatment allocation.
 
 **Metrics:** √PEHE (primary causal accuracy), 95% predictive interval coverage (calibration),
@@ -183,22 +193,19 @@ Wasserstein-1 distance (distributional fit).
 
 ## Considered and Abandoned Approaches
 
-### ACIC2018 as the benchmark dataset
+### ACIC2018 as the sole benchmark dataset
 
-ACIC2018 is DiffPO's primary quantitative benchmark. Using it would allow citing DiffPO's
-published √PEHE numbers directly for the full-covariates DiffPO condition (one cell of the
-2×2 obtained for free) and running DiffPO's existing codebase on the confounded dataset for
-the confounded DiffPO condition (no reimplementation of DiffPO needed). The dissertation
-framing as "DiffPO with latent estimation" is also arguably more natural when evaluated on
-the dataset DiffPO was designed for. With anonymised covariates a correlation-based confounding
-mechanism (flip treatment for the group defined by the binary column most correlated with
-treatment) is mathematically valid even without a real-world narrative.
+Early design considered using ACIC2018 exclusively. This would allow citing DiffPO's published
+√PEHE numbers directly for the full-covariates DiffPO condition and running DiffPO's existing
+codebase on the confounded dataset without reimplementation. The dissertation framing as "DiffPO
+with latent estimation" is also arguably more natural when evaluated on the dataset DiffPO was
+designed for.
 
-IHDP was preferred because momblack provides a principled, interpretable confounding mechanism
-with a real-world motivation (a demographic variable absent from the EHR), and because CEVAE's
-published IHDP numbers provide a natural reference for the full-covariates DiffPO-CEVAE
-condition. ACIC2018 remains the stronger choice if the dissertation is reframed around
-extending DiffPO rather than combining DiffPO with CEVAE.
+IHDP was added as the primary dataset because momblack provides a principled, interpretable
+confounding mechanism with a real-world motivation, and CEVAE's published IHDP numbers provide
+a natural reference for the full-covariates DiffPO-CEVAE condition. Both datasets are now used:
+IHDP as the primary benchmark with an interpretable confounding narrative, ACIC2018 as a
+secondary benchmark for direct comparison against DiffPO's published results.
 
 ### Simple concatenation encoder
 
@@ -214,14 +221,17 @@ posteriors over $\mathbf{z}$. Abandoned for the initial experiment — the Gauss
 standard in CEVAE and sufficient to establish whether the hybrid works at all. A natural extension
 if the Gaussian family proves too restrictive.
 
-### Providing $a$ at inference (DiffPO convention)
+### Full marginalisation over $(a, y)$ at inference
 
-Specifying the target treatment $a$ directly to the encoder at test time avoids the need for the
-auxiliary $r_\phi(a \mid \mathbf{x})$. However, the auxiliary outcome predictor
-$r_\phi(y_0 \mid \mathbf{x}, a)$ must then extrapolate to the counterfactual $a$ with full weight
-on a biased prediction. CEVAE-style marginalisation is preferable: the propensity weighting
-$r_\phi(a \mid \mathbf{x})$ naturally down-weights the counterfactual contribution to
-$\hat{\mathbf{z}}$, reducing — though not eliminating — this bias.
+Sampling $\hat{a} \sim r_\phi(a \mid \mathbf{x})$ and $\hat{y} \sim r_\phi(y \mid \mathbf{x}, \hat{a})$
+to obtain $\hat{\mathbf{z}}$ avoids requiring the observed $a$ at test time. However, DiffPO
+conditions on the observed $a$ at inference, and since the primary goal is close alignment with
+DiffPO to isolate the effect of latent confounder estimation, we adopt the same convention.
+Additionally, using the true $a$ is strictly more informative for encoding $\hat{\mathbf{z}}$
+than marginalising over a propensity sample, and avoids a training/inference mismatch where the
+denoiser sees a sampled $\hat{a}$ rather than the true $a$ it was trained with. The auxiliary
+propensity network $r_\phi(a \mid \mathbf{x})$ is still trained (it contributes $\log r_\phi(a
+\mid \mathbf{x})$ to the ELBO) but is not used at inference.
 
 ### Two-stage inference
 
