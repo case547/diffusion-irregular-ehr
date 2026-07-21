@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+
 from src.propensity import PropensityNet
 
 B, F = 64, 25
@@ -32,9 +33,16 @@ def test_importance_weights_shape():
 
 
 def test_fit_reduces_loss():
-    torch.manual_seed(0); np.random.seed(0)
-    net = PropensityNet(n_unit_in=F, n_units_out_prop=32, n_layers_out_prop=0,
-                        n_iter=100, batch_size=64, val_split_prop=0.0)
+    torch.manual_seed(0)
+    np.random.seed(0)
+    net = PropensityNet(
+        n_unit_in=F,
+        n_units_out_prop=32,
+        n_layers_out_prop=0,
+        n_iter=100,
+        batch_size=64,
+        val_split_prop=0.0,
+    )
     x, a = _data(n=128)
     loss_before = net.loss(net(x), a).item()
     net.fit(x, a)
