@@ -4,6 +4,7 @@ import json
 import logging
 import os
 from collections.abc import Callable
+from datetime import date
 
 import numpy as np
 import torch
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 def run_condition(
+    condition: str,
     cfg: Config,
     train_ds: CausalDataset,
     val_ds: CausalDataset,
@@ -40,7 +42,9 @@ def run_condition(
 
     model = model_cls(cfg.model, cfg.diffusion).to(device)
     os.makedirs(cfg.train.checkpoint_dir, exist_ok=True)
-    ckpt_path = os.path.join(cfg.train.checkpoint_dir, "best_model.pth")
+    ckpt_path = os.path.join(
+        cfg.train.checkpoint_dir, f"best_model_{condition}_{date.today().isoformat()}.pth"
+    )
 
     _train_loop(
         model, train_loader, val_loader, cfg, device, ckpt_path, log_fn=log_fn, propnet=propnet
@@ -62,13 +66,15 @@ def run_condition(
     return result
 
 
-def _fit_propnet(cfg: Config, *datasets: CausalDataset) -> PropensityNet:
+def _fit_propnet(
+    cfg: Config, *datasets: CausalDataset, log_fn: Callable | None = None
+) -> PropensityNet:
     """Fit propnet on all data (train+val+test concatenated), matching DiffPO paper."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     all_x = torch.cat([ds.x for ds in datasets])
     all_a = torch.cat([ds.a for ds in datasets])
     propnet = PropensityNet(n_unit_in=cfg.model.feature_dim, device=device)
-    propnet.fit(all_x, all_a)
+    propnet.fit(all_x, all_a, log_fn=log_fn)
     propnet.eval()
     for p in propnet.parameters():
         p.requires_grad_(False)
@@ -112,14 +118,20 @@ if __name__ == "__main__":
             make_ihdp_confounded(ds) for ds in (train_ds, val_ds, test_ds)
         )
 
-    propnet = None
-    if model_cls is DiffPO:
-        propnet = _fit_propnet(cfg, train_ds, val_ds, test_ds)
-
     with wandb.init(
-        project="diffpo-cevae-ihdp", config=cfg.model_dump(), name=args.condition
+        project="diffusion-irregular-ehr",
+        id=f"{args.condition}_{date.today().isoformat()}",
+        config=cfg.model_dump(),
+        reinit=True,
     ) as run:
+        propnet = None
+        if model_cls is DiffPO:
+            propnet = _fit_propnet(
+                cfg, train_ds, val_ds, test_ds, log_fn=lambda d, step: run.log(d, step=step)
+            )
+
         result = run_condition(
+            args.condition,
             cfg,
             train_ds,
             val_ds,
