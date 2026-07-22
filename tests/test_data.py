@@ -3,24 +3,30 @@ import pandas as pd
 import pytest
 import torch
 
-from src.data import CausalDataset, load_ihdp, make_ihdp_confounded, load_acic, make_acic_confounded
-
+from src.data import (
+    CausalDataset,
+    load_acic,
+    make_acic_confounded,
+    make_ihdp_confounded,
+)
 
 # ── shared fixture ────────────────────────────────────────────────────────────
 
+
 def _fake(n: int = 100, f: int = 25):
     return (
-        np.random.randn(n, f).astype(np.float32),        # x
-        np.random.randint(0, 2, n).astype(np.float32),   # a
-        np.random.randn(n).astype(np.float32),            # y
-        np.random.randn(n).astype(np.float32),            # y_cf
-        np.random.randn(n).astype(np.float32),            # mu0
-        np.random.randn(n).astype(np.float32),            # mu1
-        np.random.randint(0, 2, n).astype(np.float32),   # confounder
+        np.random.randn(n, f).astype(np.float32),  # x
+        np.random.randint(0, 2, n).astype(np.float32),  # a
+        np.random.randn(n).astype(np.float32),  # y
+        np.random.randn(n).astype(np.float32),  # y_cf
+        np.random.randn(n).astype(np.float32),  # mu0
+        np.random.randn(n).astype(np.float32),  # mu1
+        np.random.randint(0, 2, n).astype(np.float32),  # confounder
     )
 
 
 # ── CausalDataset ─────────────────────────────────────────────────────────────
+
 
 def test_dataset_shapes():
     x, a, y, y_cf, mu0, mu1, conf = _fake(100)
@@ -52,11 +58,12 @@ def test_confounder_not_in_getitem():
 
 # ── IHDP confounding ──────────────────────────────────────────────────────────
 
+
 def test_make_ihdp_confounded_shapes():
     x, a, y, y_cf, mu0, mu1, conf = _fake(100)
     ds = CausalDataset(x, a, y, y_cf, mu0, mu1, conf)
     ds_c = make_ihdp_confounded(ds)
-    assert ds_c[0]["x"].shape == (25,)   # x unchanged
+    assert ds_c[0]["x"].shape == (25,)  # x unchanged
 
 
 def test_make_ihdp_confounded_flip():
@@ -81,18 +88,20 @@ def test_make_ihdp_confounded_outcomes_unchanged():
 
 # ── ACIC loading ──────────────────────────────────────────────────────────────
 
+
 @pytest.fixture
 def acic_csv(tmp_path):
     """Fake ACIC norm_data CSV: 100 rows, 5 covariates (cols 5-9)."""
     np.random.seed(0)
     N, F = 100, 5
     data = np.zeros((N, F + 5), dtype=np.float32)
-    data[:50, 0] = 0; data[50:, 0] = 1          # treatment
-    data[:, 1] = np.random.randn(N)              # y0
-    data[:, 2] = np.random.randn(N)              # y1
-    data[:, 3] = data[:, 1]                      # mu0
-    data[:, 4] = data[:, 2]                      # mu1
-    data[:, 5:] = np.random.randn(N, F)          # covariates
+    data[:50, 0] = 0
+    data[50:, 0] = 1  # treatment
+    data[:, 1] = np.random.randn(N)  # y0
+    data[:, 2] = np.random.randn(N)  # y1
+    data[:, 3] = data[:, 1]  # mu0
+    data[:, 4] = data[:, 2]  # mu1
+    data[:, 5:] = np.random.randn(N, F)  # covariates
     # make col 5 strongly correlated with treatment
     data[:, 5] = data[:, 0] + 0.1 * np.random.randn(N)
     sheet_id = "fake_sheet"

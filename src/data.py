@@ -1,4 +1,5 @@
 import os
+
 import numpy as np
 import torch
 from torch.utils.data import Dataset
@@ -27,22 +28,29 @@ class CausalDataset(Dataset):
         item = {"x": self.x[idx], "a": self.a[idx], "y": self.y[idx]}
         if self.y_cf is not None:
             item["y_cf"] = self.y_cf[idx]
-        if self.mu0 is not None:
+        if self.mu0 is not None and self.mu1 is not None:
             item["mu0"] = self.mu0[idx]
             item["mu1"] = self.mu1[idx]
         return item
 
 
-def load_ihdp(data_dir: str, replication: int = 1, train_ratio: float = 0.7, test_ratio: float = 0.15):
+def load_ihdp(
+    data_dir: str,
+    replication: int = 1,
+    train_ratio: float = 0.7,
+    test_ratio: float = 0.15,
+):
     """
     Load one NPCI replication from data_dir/with_race/ihdp_with_race_{replication}.csv.
 
-    CSV columns (header row present): treat, y_factual, y_cfactual, mu0, mu1,
-    bw..was (x1-x25), momwhite, momblack, momhisp.
+    CSV columns (header row present):
+        treat, y_factual, y_cfactual, mu0, mu1,
+        bw..was (x1-x25), momwhite, momblack, momhisp.
     x[:,13] (the `first` variable) is stored as {1,2} -- adjusted to {1,0}.
     momblack is stored as ds.confounder (binary; never in x).
-    Split: train (train_ratio) vs valtest (1-train_ratio), then test (test_ratio) from valtest;
-    val = 1 - train_ratio - test_ratio -> 70/15/15 (random_state=1).
+    Split:
+        train (train_ratio) vs valtest (1-train_ratio), then test (test_ratio) from valtest;
+        val = 1 - train_ratio - test_ratio -> 70/15/15 (random_state=1).
     Both splits stratified on treatment to preserve ~20% treated rate in each fold.
     Outcomes normalised to training-split mean/std.
     """
@@ -57,14 +65,21 @@ def load_ihdp(data_dir: str, replication: int = 1, train_ratio: float = 0.7, tes
     y_cf = df["y_cfactual"].values.astype(np.float32)
     mu0 = df["mu0"].values.astype(np.float32)
     mu1 = df["mu1"].values.astype(np.float32)
-    x = df.iloc[:, 5:30].values.astype(np.float32)   # x1-x25
-    x[:, 13] = 2 - x[:, 13]                            # first: {1,2} -> {1,0}
+    x = df.iloc[:, 5:30].values.astype(np.float32)  # x1-x25
+    x[:, 13] = 2 - x[:, 13]  # first: {1,2} -> {1,0}
     confounder = df["momblack"].values.astype(np.float32)
 
     idx = np.arange(len(a))
     valtest_ratio = 1.0 - train_ratio
-    idx_train, idx_valtest = train_test_split(idx, test_size=valtest_ratio, random_state=1, stratify=a)
-    idx_val, idx_test = train_test_split(idx_valtest, test_size=test_ratio / valtest_ratio, random_state=1, stratify=a[idx_valtest])
+    idx_train, idx_valtest = train_test_split(
+        idx, test_size=valtest_ratio, random_state=1, stratify=a
+    )
+    idx_val, idx_test = train_test_split(
+        idx_valtest,
+        test_size=test_ratio / valtest_ratio,
+        random_state=1,
+        stratify=a[idx_valtest],
+    )
 
     y_mean = y[idx_train].mean()
     y_std = y[idx_train].std() + 1e-8
@@ -74,7 +89,15 @@ def load_ihdp(data_dir: str, replication: int = 1, train_ratio: float = 0.7, tes
     mu1 = (mu1 - y_mean) / y_std
 
     def _make(idx_):
-        return CausalDataset(x[idx_], a[idx_], y[idx_], y_cf[idx_], mu0[idx_], mu1[idx_], confounder[idx_])
+        return CausalDataset(
+            x[idx_],
+            a[idx_],
+            y[idx_],
+            y_cf[idx_],
+            mu0[idx_],
+            mu1[idx_],
+            confounder[idx_],
+        )
 
     return _make(idx_train), _make(idx_val), _make(idx_test)
 
@@ -94,7 +117,13 @@ def make_ihdp_confounded(ds: CausalDataset) -> CausalDataset:
     return CausalDataset(ds.x.numpy(), a, ds.y.numpy(), y_cf, mu0, mu1, ds.confounder.copy())
 
 
-def load_acic(data_dir: str, sheet_id: str, split_seed: int = 1, train_ratio: float = 0.7, test_ratio: float = 0.15):
+def load_acic(
+    data_dir: str,
+    sheet_id: str,
+    split_seed: int = 1,
+    train_ratio: float = 0.7,
+    test_ratio: float = 0.15,
+):
     """
     Load one ACIC2018 sheet from data_dir/{sheet_id}.csv (DiffPO norm_data format).
 
@@ -119,21 +148,36 @@ def load_acic(data_dir: str, sheet_id: str, split_seed: int = 1, train_ratio: fl
     mu0 = data[:, 3]
     mu1 = data[:, 4]
     x = data[:, 5:]
-    y = (1.0 - a) * y0_pot + a * y1_pot          # factual outcome
-    y_cf = a * y0_pot + (1.0 - a) * y1_pot       # counterfactual outcome
+    y = (1.0 - a) * y0_pot + a * y1_pot  # factual outcome
+    y_cf = a * y0_pot + (1.0 - a) * y1_pot  # counterfactual outcome
 
     # covariate most correlated with treatment -> binary confounder
-    corr = np.abs(np.corrcoef(x.T, a)[-1, :-1])   # shape (F,)
+    corr = np.abs(np.corrcoef(x.T, a)[-1, :-1])  # shape (F,)
     hidden_idx = int(corr.argmax())
     confounder = (x[:, hidden_idx] > np.median(x[:, hidden_idx])).astype(np.float32)
 
     idx = np.arange(len(a))
     valtest_ratio = 1.0 - train_ratio
-    idx_train, idx_valtest = train_test_split(idx, test_size=valtest_ratio, random_state=split_seed, stratify=a)
-    idx_val, idx_test = train_test_split(idx_valtest, test_size=test_ratio / valtest_ratio, random_state=split_seed, stratify=a[idx_valtest])
+    idx_train, idx_valtest = train_test_split(
+        idx, test_size=valtest_ratio, random_state=split_seed, stratify=a
+    )
+    idx_val, idx_test = train_test_split(
+        idx_valtest,
+        test_size=test_ratio / valtest_ratio,
+        random_state=split_seed,
+        stratify=a[idx_valtest],
+    )
 
     def _make(idx_):
-        return CausalDataset(x[idx_], a[idx_], y[idx_], y_cf[idx_], mu0[idx_], mu1[idx_], confounder[idx_])
+        return CausalDataset(
+            x[idx_],
+            a[idx_],
+            y[idx_],
+            y_cf[idx_],
+            mu0[idx_],
+            mu1[idx_],
+            confounder[idx_],
+        )
 
     return _make(idx_train), _make(idx_val), _make(idx_test)
 

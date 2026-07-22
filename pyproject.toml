@@ -38,6 +38,7 @@ torchvision = [
 
 [tool.ruff]
 exclude = ["DiffPO"]
+line-length = 95
 
 [tool.ruff.lint]
 select = [
