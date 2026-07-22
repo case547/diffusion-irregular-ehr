@@ -13,7 +13,7 @@ class ZEncoder(nn.Module):
 
     def __init__(self, feature_dim: int, latent_dim: int, hidden_dim: int, num_layers: int):
         super().__init__()
-        trunk_sizes = [feature_dim + 1] + [hidden_dim] * num_layers
+        trunk_sizes = [feature_dim + 1] + [hidden_dim] * (num_layers - 1)
         self.trunk = FullyConnected(trunk_sizes, final_activation=nn.ELU())
         self.head0 = DiagNormalNet([hidden_dim, latent_dim])  # a=0
         self.head1 = DiagNormalNet([hidden_dim, latent_dim])  # a=1
