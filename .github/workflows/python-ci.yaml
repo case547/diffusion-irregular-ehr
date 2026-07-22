@@ -34,8 +34,10 @@ jobs:
         if: always()
         run: uv run pytest
 
+  conventional-commits:
+    runs-on: ubuntu-24.04
+    steps:
       - name: 👮 PR Conventional Commit Validation
-        if: always()
         uses: ytanikin/pr-conventional-commits@1.5.2
         with:
           task_types: '["feat","fix","docs","test","ci","refactor","perf","chore","revert"]'
