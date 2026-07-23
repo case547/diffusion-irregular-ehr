@@ -99,7 +99,12 @@ if __name__ == "__main__":
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        handlers=[logging.StreamHandler(), logging.FileHandler(f"{args.condition}.log")],
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler(
+                os.path.join("logs", f"{args.condition}_{date.today().isoformat()}.log")
+            ),
+        ],
     )
 
     with open(args.config) as f:
@@ -152,6 +157,9 @@ if __name__ == "__main__":
             result[k] *= y_std
         run.log({f"test/{k}": v for k, v in result.items()})
 
-    with open(f"results_{args.condition}.json", "w") as f:
+    with open(
+        os.path.join("results", f"results_{args.condition}_{date.today().isoformat()}.json"),
+        "w",
+    ) as f:
         json.dump(result, f, indent=2)
     print(result)
