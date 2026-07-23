@@ -75,7 +75,7 @@ class PropensityNet(nn.Module):
         batch_size: int = 100,
         seed: int = 42,
         val_split_prop: float = 0.3,
-        patience: int = 10,
+        patience: int = 20,
         n_iter_min: int = 200,
         clipping_value: int = 1,
         batch_norm: bool = True,
@@ -160,6 +160,7 @@ class PropensityNet(nn.Module):
         loader = DataLoader(TensorDataset(X, y), batch_size=batch_size, shuffle=True)
         val_loss_best = float("inf")
         patience_left = self.patience
+        best_state: dict = {}
 
         for i in range(self.n_iter):
             train_losses = []
@@ -175,7 +176,8 @@ class PropensityNet(nn.Module):
                 val_loss = self.loss(self.forward(X_val), y_val).item()
             train_loss_avg = sum(train_losses) / len(train_losses)
             logger.info(
-                f"PropensityNet iter {i}: train={train_loss_avg:.4f} val={val_loss:.4f}"
+                f"PropensityNet iter {i}:"
+                f" train_loss={train_loss_avg:.4f} val_loss={val_loss:.4f}"
             )
             if log_fn is not None:
                 log_fn(
@@ -185,11 +187,14 @@ class PropensityNet(nn.Module):
             if val_loss < val_loss_best:
                 val_loss_best = val_loss
                 patience_left = self.patience
+                best_state = {k: v.clone() for k, v in self.state_dict().items()}
             else:
                 patience_left -= 1
-            if patience_left == 0 and i >= self.n_iter_min:
+            if patience_left <= 0 and i >= self.n_iter_min:
                 logger.info(f"PropensityNet early stopping at iter {i}")
                 break
 
+        if best_state:
+            self.load_state_dict(best_state)
         self.eval()
         return self
