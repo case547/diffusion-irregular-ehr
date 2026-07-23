@@ -5,13 +5,13 @@ Adapted from DiffPO/PropensityNet.py: same architecture (Linear -> BatchNorm -> 
 """
 
 import logging
+from collections.abc import Callable
 
 import numpy as np
 import torch
 import torch.nn as nn
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, TensorDataset
-from wandb import Run
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +139,7 @@ class PropensityNet(nn.Module):
         return a / p + (1 - a) / (1 - p)
 
     def fit(
-        self, X: torch.Tensor, y: torch.Tensor, wandb_run: Run | None = None
+        self, X: torch.Tensor, y: torch.Tensor, log_fn: Callable | None = None
     ) -> "PropensityNet":  # noqa: UP037
         self.train()
         X = X.float().to(self.device)
@@ -177,10 +177,10 @@ class PropensityNet(nn.Module):
             logger.info(
                 f"PropensityNet iter {i}: train={train_loss_avg:.4f} val={val_loss:.4f}"
             )
-            if wandb_run is not None:
-                wandb_run.log(
+            if log_fn is not None:
+                log_fn(
                     {"propensity/train_loss": train_loss_avg, "propensity/val_loss": val_loss},
-                    step=i,
+                    i,
                 )
             if val_loss < val_loss_best:
                 val_loss_best = val_loss
