@@ -40,6 +40,9 @@ torchvision = [
 exclude = ["DiffPO"]
 line-length = 95
 
+[tool.ruff.lint.isort]
+known-third-party = ["wandb"]
+
 [tool.ruff.lint]
 select = [
     # pycodestyle
