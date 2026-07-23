@@ -1,0 +1,43 @@
+{
+  "os": "Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+  "python": "CPython 3.14.2",
+  "startedAt": "2026-07-23T21:15:39.238345Z",
+  "args": [
+    "--condition",
+    "diffpo_full"
+  ],
+  "program": "/home/justin/msc_ai/individual-project/diffusion-irregular-ehr/experiment.py",
+  "codePath": "experiment.py",
+  "codePathLocal": "experiment.py",
+  "git": {
+    "remote": "git@github.com:case547/diffusion-irregular-ehr.git",
+    "commit": "c6110514ad044d971d2951579978833b303b411b"
+  },
+  "email": "justinmak2001@gmail.com",
+  "root": "/home/justin/msc_ai/individual-project/diffusion-irregular-ehr",
+  "host": "JM-M16",
+  "executable": "/home/justin/msc_ai/individual-project/diffusion-irregular-ehr/.venv/bin/python3",
+  "cpu_count": 10,
+  "cpu_count_logical": 20,
+  "gpu": "NVIDIA GeForce RTX 3080 Ti Laptop GPU",
+  "gpu_count": 1,
+  "disk": {
+    "/": {
+      "total": "1081101176832",
+      "used": "206976987136"
+    }
+  },
+  "memory": {
+    "total": "16605941760"
+  },
+  "gpu_nvidia": [
+    {
+      "name": "NVIDIA GeForce RTX 3080 Ti Laptop GPU",
+      "memoryTotal": "17179869184",
+      "architecture": "Ampere",
+      "uuid": "GPU-14581ff7-77d5-d7e5-5ca9-e138f8670582"
+    }
+  ],
+  "cudaVersion": "13.3",
+  "writerId": "b0bj1gei182ej73ct3sc4aa7z1o7heq1"
+}
