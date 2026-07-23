@@ -1,7 +1,7 @@
 # DiffPO-CEVAE: Extending DiffPO to Handle Hidden Confounders
 
 **Date:** 2026-07-09
-**Status:** Draft
+**Status:** Implemented
 
 ---
 
@@ -54,6 +54,18 @@ $$
 
 where $y_{i,\tau} = \sqrt{\bar\alpha_\tau}\,y_{i,0} + \sqrt{1-\bar\alpha_\tau}\,\epsilon$ and
 $p(\mathbf{z}_i) = \mathcal{N}(\mathbf{0}, \mathbf{I})$.
+
+**Diffusion loss implementation detail.** The denoiser operates on a 2-vector $[y_0, y_1]_\tau$
+rather than a scalar, so it can learn joint structure across both PO slots. The counterfactual slot
+is populated using the simulation-provided ground-truth $y_\text{cf}$ during training. Only the
+factual slot contributes to the loss via a binary mask $m_{ij} = \mathbf{1}[j = a_i]$:
+
+$$\mathcal{L}_\text{diff} = \frac{\displaystyle\sum_{i=1}^{B}\sum_{j\in\{0,1\}} m_{ij}\,\|\epsilon_{ij} - \hat\epsilon_{\theta,ij}\|^2}{\displaystyle\sum_{i,j} m_{ij}}$$
+
+The ground-truth $y_\text{cf}$ is only used to construct the noisy denoiser input — it is never
+passed to the encoder and is not required at inference (the reverse process generates both PO slots
+from pure noise). This is not data leakage: the supervision signal still comes only from the
+factual outcome.
 
 The three terms are:
 
@@ -140,6 +152,10 @@ of each PO (matching DiffPO's convention of conditioning on observed $a$):
    and $p(Y(1) \mid \mathbf{x}^*, a^*)$ respectively, from which point estimates, predictive
    intervals, Wasserstein distances, and CATE estimates can be derived.
 
+Note that $y_\text{cf}$ is not required at inference. The reverse diffusion generates both PO
+slots from pure noise $y_L \sim \mathcal{N}(\mathbf{0},\mathbf{I}^2)$, so only the observed
+$(\mathbf{x}^*, a^*)$ and the imputed $\hat{y}$ from the auxiliary network are needed.
+
 ### Datasets and Experimental Structure
 
 **Primary dataset: IHDP.** 747 patients, 25 features (6 continuous, 19 binary), binary treatment.
@@ -186,8 +202,11 @@ Both mechanisms are treatment label corruption rather than classical latent-vari
 (where z causally generates both a and y). They are realistic proxies for a demographic variable
 absent from the EHR that systematically affected treatment allocation.
 
-**Metrics:** √PEHE (primary causal accuracy), 95% predictive interval coverage (calibration),
-Wasserstein-1 distance (distributional fit).
+**Metrics:** √PEHE (primary causal accuracy), 95% and 99% predictive interval coverage and width
+(calibration), RMSE per PO (outcome accuracy). Outcomes are normalised to training-split mean and
+standard deviation during training; all metrics that depend on outcome scale (√PEHE, RMSE,
+interval widths) are multiplied by the training-split standard deviation $\sigma_\text{train}$
+before reporting, so results are interpretable in the original outcome scale.
 
 ---
 
