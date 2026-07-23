@@ -75,7 +75,7 @@ class PropensityNet(nn.Module):
         batch_size: int = 100,
         seed: int = 42,
         val_split_prop: float = 0.3,
-        patience: int = 10,
+        patience: int = 20,
         n_iter_min: int = 200,
         clipping_value: int = 1,
         batch_norm: bool = True,
