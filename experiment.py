@@ -105,7 +105,7 @@ if __name__ == "__main__":
     with open(args.config) as f:
         cfg = Config.model_validate(yaml.safe_load(f))
 
-    train_ds, val_ds, test_ds = load_ihdp(
+    train_ds, val_ds, test_ds, y_std = load_ihdp(
         cfg.data.path,
         replication=cfg.data.replication,
         train_ratio=cfg.data.train_ratio,
@@ -140,6 +140,16 @@ if __name__ == "__main__":
             propnet,
             log_fn=lambda d, step: run.log(d, step=step),
         )
+        for k in (
+            "pehe",
+            "rmse_y0",
+            "rmse_y1",
+            "width_95_y0",
+            "width_95_y1",
+            "width_99_y0",
+            "width_99_y1",
+        ):
+            result[k] *= y_std
         run.log({f"test/{k}": v for k, v in result.items()})
 
     with open(f"results_{args.condition}.json", "w") as f:

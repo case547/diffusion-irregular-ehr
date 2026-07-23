@@ -99,7 +99,7 @@ def load_ihdp(
             confounder[idx_],
         )
 
-    return _make(idx_train), _make(idx_val), _make(idx_test)
+    return _make(idx_train), _make(idx_val), _make(idx_test), float(y_std)
 
 
 def make_ihdp_confounded(ds: CausalDataset) -> CausalDataset:
