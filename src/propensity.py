@@ -176,22 +176,25 @@ class PropensityNet(nn.Module):
                 val_loss = self.loss(self.forward(X_val), y_val).item()
             train_loss_avg = sum(train_losses) / len(train_losses)
             logger.info(
-                f"PropensityNet iter {i}:"
+                f"PropensityNet epoch {i + 1}:"
                 f" train_loss={train_loss_avg:.4f} val_loss={val_loss:.4f}"
             )
             if log_fn is not None:
                 log_fn(
                     {"propensity/train_loss": train_loss_avg, "propensity/val_loss": val_loss},
-                    i,
+                    i + 1,
                 )
             if val_loss < val_loss_best:
                 val_loss_best = val_loss
                 patience_left = self.patience
                 best_state = {k: v.clone() for k, v in self.state_dict().items()}
+                logger.info(
+                    f"PropensityNet new best val_loss={val_loss_best:.4f} at epoch {i + 1}"
+                )
             else:
                 patience_left -= 1
             if patience_left <= 0 and i >= self.n_iter_min:
-                logger.info(f"PropensityNet early stopping at iter {i}")
+                logger.info(f"PropensityNet early stopping at epoch {i + 1}")
                 break
 
         if best_state:

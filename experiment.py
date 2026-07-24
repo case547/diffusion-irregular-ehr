@@ -50,19 +50,7 @@ def run_condition(
         model, train_loader, val_loader, cfg, device, ckpt_path, log_fn=log_fn, propnet=propnet
     )
     result = evaluate(model, test_loader, cfg.train.K, device)
-    header = (
-        f"{'C95 Y0':>8} {'C95 Y1':>8} {'W95 Y0':>8} {'W95 Y1':>8}"
-        f" {'C99 Y0':>8} {'C99 Y1':>8} {'W99 Y0':>8} {'W99 Y1':>8}"
-        f" {'RMSE Y0':>8} {'RMSE Y1':>8} {'PEHE':>8}"
-    )
-    row = (
-        f"{result['coverage_95_y0']:>8.4f} {result['coverage_95_y1']:>8.4f}"
-        f" {result['width_95_y0']:>8.4f} {result['width_95_y1']:>8.4f}"
-        f" {result['coverage_99_y0']:>8.4f} {result['coverage_99_y1']:>8.4f}"
-        f" {result['width_99_y0']:>8.4f} {result['width_99_y1']:>8.4f}"
-        f" {result['rmse_y0']:>8.4f} {result['rmse_y1']:>8.4f} {result['pehe']:>8.4f}"
-    )
-    logger.info("Test results:\n%s\n%s", header, row)
+    logger.info("Test results:\n%s", ", ".join(f"{k}: {v:.4f}" for k, v in result.items()))
     return result
 
 
@@ -75,6 +63,7 @@ def _fit_propnet(
     all_a = torch.cat([ds.a for ds in datasets])
     propnet = PropensityNet(n_unit_in=cfg.model.feature_dim, device=device)
     propnet.fit(all_x, all_a, log_fn=log_fn)
+    logger.info("PropensityNet fitted on all data: train+val+test.")
     propnet.eval()
     for p in propnet.parameters():
         p.requires_grad_(False)
