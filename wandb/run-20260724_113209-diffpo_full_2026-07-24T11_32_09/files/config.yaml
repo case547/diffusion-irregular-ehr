@@ -1,0 +1,114 @@
+_wandb:
+    value:
+        cli_version: 0.28.0
+        e:
+            uohi6hmf87dy2i3jowk8xrebp2lxigm1:
+                args:
+                    - --condition
+                    - diffpo_full
+                codePath: experiment.py
+                codePathLocal: experiment.py
+                cpu_count: 10
+                cpu_count_logical: 20
+                cudaVersion: "13.3"
+                disk:
+                    /:
+                        total: "1081101176832"
+                        used: "206943318016"
+                email: justinmak2001@gmail.com
+                executable: /home/justin/msc_ai/individual-project/diffusion-irregular-ehr/.venv/bin/python3
+                git:
+                    commit: 5d399d71e188c4f364a55ae065a77f46ad53780b
+                    remote: git@github.com:case547/diffusion-irregular-ehr.git
+                gpu: NVIDIA GeForce RTX 3080 Ti Laptop GPU
+                gpu_count: 1
+                gpu_nvidia:
+                    - architecture: Ampere
+                      memoryTotal: "17179869184"
+                      name: NVIDIA GeForce RTX 3080 Ti Laptop GPU
+                      uuid: GPU-14581ff7-77d5-d7e5-5ca9-e138f8670582
+                host: JM-M16
+                memory:
+                    total: "16605941760"
+                os: Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.39
+                program: /home/justin/msc_ai/individual-project/diffusion-irregular-ehr/experiment.py
+                python: CPython 3.14.2
+                root: /home/justin/msc_ai/individual-project/diffusion-irregular-ehr
+                startedAt: "2026-07-24T10:32:09.936532Z"
+                writerId: uohi6hmf87dy2i3jowk8xrebp2lxigm1
+        m:
+            - "2": propensity/*
+              "5": 2
+              "6":
+                - 1
+              "7": []
+            - "1": propnet/step
+              "6": []
+              "7": []
+            - "2": train/*
+              "5": 4
+              "6":
+                - 1
+              "7": []
+            - "1": train/step
+              "6": []
+              "7": []
+            - "2": val/*
+              "5": 4
+              "6":
+                - 1
+              "7": []
+        python_version: 3.14.2
+        t:
+            "1":
+                - 1
+                - 5
+                - 53
+            "2":
+                - 1
+                - 5
+                - 53
+            "3":
+                - 2
+                - 7
+                - 14
+                - 16
+            "4": 3.14.2
+            "5": 0.28.0
+            "10":
+                - 20
+            "12": 0.28.0
+            "13": linux-x86_64
+data:
+    value:
+        path: data/ihdp
+        replication: 1
+        test_ratio: 0.15
+        train_ratio: 0.7
+diffusion:
+    value:
+        beta_end: 0.5
+        beta_start: 0.0001
+        block_dim: 32
+        embedding_dim: 32
+        hidden_dim: 32
+        num_blocks: 4
+        num_steps: 100
+        schedule: quad
+model:
+    value:
+        feature_dim: 25
+        hidden_dim: 64
+        latent_dim: 20
+        num_layers: 2
+train:
+    value:
+        K: 50
+        batch_size: 128
+        checkpoint_dir: checkpoints
+        early_stopping: false
+        epochs: 500
+        lr: 0.0005
+        patience: 20
+        seed: 42
+        warmup_epochs: 50
