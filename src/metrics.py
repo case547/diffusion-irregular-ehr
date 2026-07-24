@@ -60,6 +60,9 @@ def rmse(
 ) -> tuple[float, float]:
     """
     Per-PO RMSE using sample mean as point estimate.
+
+    y0 and y1 are (B, K) predictive samples; mu0 and mu1 are (B,) true expected POs.
+
     Returns (rmse_y0, rmse_y1).
     """
     r0 = (y0.mean(dim=1) - mu0).pow(2).mean().sqrt().item()
