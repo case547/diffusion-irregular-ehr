@@ -130,7 +130,7 @@ def _train_loop(
         if log_fn is not None:
             log = {f"train/{k}": v / n_batches for k, v in epoch_losses.items()}
             log.update({f"val/{k}": v for k, v in val_comps.items()})
-            log_fn(log, epoch)
+            log_fn(log, epoch + 1)
 
         val_loss = val_comps["total_loss"]
         log_msg = f"Epoch {epoch + 1}: val_elbo {val_loss:.4f}"
