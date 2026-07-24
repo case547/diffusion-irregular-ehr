@@ -123,7 +123,7 @@ if __name__ == "__main__":
         config=cfg.model_dump(),
         reinit=True,
     ) as run:
-        run.define_metric("propensity/*", step_metric="propnet/step")
+        run.define_metric("propnet/*", step_metric="propnet/step")
         run.define_metric("train/*", step_metric="train/step")
         run.define_metric("val/*", step_metric="train/step")
 

@@ -181,7 +181,7 @@ class PropensityNet(nn.Module):
             )
             if log_fn is not None:
                 log_fn(
-                    {"propensity/train_loss": train_loss_avg, "propensity/val_loss": val_loss},
+                    {"propnet/train_loss": train_loss_avg, "propnet/val_loss": val_loss},
                     i + 1,
                 )
             if val_loss < val_loss_best:
