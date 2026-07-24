@@ -13,6 +13,8 @@ from src.metrics import coverage, pehe, rmse
 from src.model import _DiffusionBase
 from src.propensity import PropensityNet
 
+logger = logging.getLogger(__name__)
+
 
 def calculate_val_loss(
     model: _DiffusionBase,
@@ -48,7 +50,7 @@ def evaluate(
         for batch in loader:
             x = batch["x"].to(device)
             a = batch["a"].to(device)
-            y0_s, y1_s = model.sample_outcomes(x, a, K=K)
+            y0_s, y1_s = model.sample_outcomes(x, a, K=K)  # each (B,K)
             all_y0.append(y0_s.cpu())
             all_y1.append(y1_s.cpu())
             all_mu0.append(batch["mu0"])
@@ -84,6 +86,7 @@ def _train_loop(
     ckpt_path: str,
     log_fn: Callable | None = None,
     propnet: PropensityNet | None = None,
+    early_stopping: bool = False,
 ) -> None:
     """MultiStepLR training with early stopping on total val ELBO.
 
@@ -98,7 +101,6 @@ def _train_loop(
         optimizer, milestones=[p0, p1, p2, p3], gamma=0.1
     )
 
-    logger = logging.getLogger(__name__)
     best_val_elbo = float("inf")
     patience_left = cfg.train.patience
 
@@ -131,20 +133,21 @@ def _train_loop(
             log_fn(log, epoch)
 
         val_loss = val_comps["total_loss"]
+        log_msg = f"Epoch {epoch + 1}: val_elbo {val_loss:.4f}"
+
         if val_loss < best_val_elbo:
             best_val_elbo = val_loss
             torch.save(model.state_dict(), ckpt_path)
-            if epoch >= cfg.train.warmup_epochs:
+            if early_stopping and epoch >= cfg.train.warmup_epochs:
                 patience_left = cfg.train.patience
-            logger.info(f"Epoch {epoch + 1}: val_elbo {val_loss:.4f} ✓ (saved)")
-        elif epoch >= cfg.train.warmup_epochs:
+            logger.info(f"{log_msg} ✓ (saved)")
+        elif early_stopping and epoch >= cfg.train.warmup_epochs:
             patience_left -= 1
-            logger.info(
-                f"Epoch {epoch + 1}: val_elbo {val_loss:.4f} "
-                f"(patience {patience_left}/{cfg.train.patience})"
-            )
+            logger.info(f"{log_msg} (patience {patience_left}/{cfg.train.patience})")
             if patience_left == 0:
                 logger.info("Early stopping.")
                 break
+        else:
+            logger.info(log_msg)
 
     model.load_state_dict(torch.load(ckpt_path, map_location=device))

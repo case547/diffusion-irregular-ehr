@@ -25,6 +25,7 @@ class TrainConfig(BaseModel):
     lr: float
     seed: int
     K: int
+    early_stopping: bool
     patience: int
     warmup_epochs: int
     checkpoint_dir: str

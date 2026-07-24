@@ -47,7 +47,15 @@ def run_condition(
     )
 
     _train_loop(
-        model, train_loader, val_loader, cfg, device, ckpt_path, log_fn=log_fn, propnet=propnet
+        model,
+        train_loader,
+        val_loader,
+        cfg,
+        device,
+        ckpt_path,
+        log_fn=log_fn,
+        propnet=propnet,
+        early_stopping=cfg.train.early_stopping,
     )
     result = evaluate(model, test_loader, cfg.train.K, device)
     logger.info("Test results:\n%s", ", ".join(f"{k}: {v:.4f}" for k, v in result.items()))
