@@ -44,17 +44,7 @@ def _ds(n=32, f=5):
 
 def test_run_condition_returns_metrics():
     ds = _ds()
-<<<<<<< HEAD
-<<<<<<< HEAD
     result = run_condition("test_run", SMALL_CFG, train_ds=ds, val_ds=ds, test_ds=ds)
-=======
-    result = run_condition(
-        SMALL_CFG, train_ds=ds, val_ds=ds, test_ds=ds, ckpt_path="/tmp/model_for_pytest.pth"
-    )
->>>>>>> d383665 (introduce run_time_str)
-=======
-    result = run_condition("test_run_id", SMALL_CFG, train_ds=ds, val_ds=ds, test_ds=ds)
->>>>>>> 7ba0438 (Run using final model for eval)
     assert set(result.keys()) == {
         "coverage_95_y0",
         "coverage_95_y1",
