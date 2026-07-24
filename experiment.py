@@ -22,11 +22,11 @@ logger = logging.getLogger(__name__)
 
 
 def run_condition(
-    condition: str,
     cfg: Config,
     train_ds: CausalDataset,
     val_ds: CausalDataset,
     test_ds: CausalDataset,
+    ckpt_path: str,
     model_cls: type[_DiffusionBase] = DiffPOCEVAE,
     propnet: PropensityNet | None = None,
     log_fn: Callable | None = None,
@@ -42,9 +42,6 @@ def run_condition(
 
     model = model_cls(cfg.model, cfg.diffusion).to(device)
     os.makedirs(cfg.train.checkpoint_dir, exist_ok=True)
-    ckpt_path = os.path.join(
-        cfg.train.checkpoint_dir, f"best_model_{condition}_{datetime.now().isoformat()}.pth"
-    )
 
     _train_loop(
         model,
@@ -58,7 +55,7 @@ def run_condition(
         early_stopping=cfg.train.early_stopping,
     )
     result = evaluate(model, test_loader, cfg.train.K, device)
-    logger.info("Test results:\n%s", ", ".join(f"{k}: {v:.4f}" for k, v in result.items()))
+    logger.info("Test results:\n%s", ", ".join(f"{k}: {v:>8.4f}" for k, v in result.items()))
     return result
 
 
@@ -93,14 +90,14 @@ if __name__ == "__main__":
     parser.add_argument("--config", default="config/ihdp.yaml")
     args = parser.parse_args()
 
+    run_time_str = datetime.now().isoformat(timespec="seconds").replace(":", "_")
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler(
-                os.path.join("logs", f"{args.condition}_{datetime.now().isoformat()}.log")
-            ),
+            logging.FileHandler(os.path.join("logs", f"{args.condition}_{run_time_str}.log")),
         ],
     )
 
@@ -122,7 +119,7 @@ if __name__ == "__main__":
 
     with wandb.init(
         project="diffusion-irregular-ehr",
-        id=f"{args.condition}_{datetime.now().isoformat()}",
+        id=f"{args.condition}_{run_time_str}",
         config=cfg.model_dump(),
         reinit=True,
     ) as run:
@@ -141,11 +138,13 @@ if __name__ == "__main__":
             )
 
         result = run_condition(
-            args.condition,
             cfg,
             train_ds,
             val_ds,
             test_ds,
+            os.path.join(
+                cfg.train.checkpoint_dir, f"best_model_{args.condition}_{run_time_str}.pth"
+            ),
             model_cls,
             propnet,
             log_fn=lambda d, step: run.log({**d, "train/step": step}),
@@ -163,8 +162,7 @@ if __name__ == "__main__":
         run.log({f"test/{k}": v for k, v in result.items()})
 
     with open(
-        os.path.join("results", f"results_{args.condition}_{datetime.now().isoformat()}.json"),
-        "w",
+        os.path.join("results", f"results_{args.condition}_{run_time_str}.json"), "w"
     ) as f:
         json.dump(result, f, indent=2)
     print(result)
