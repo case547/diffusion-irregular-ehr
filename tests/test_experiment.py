@@ -22,6 +22,8 @@ SMALL_CFG = Config(
         lr=1e-3,
         seed=0,
         K=3,
+        use_final_model=False,
+        early_stopping=True,
         patience=999,
         warmup_epochs=0,
         checkpoint_dir="/tmp",
@@ -42,7 +44,7 @@ def _ds(n=32, f=5):
 
 def test_run_condition_returns_metrics():
     ds = _ds()
-    result = run_condition("test_condition", SMALL_CFG, train_ds=ds, val_ds=ds, test_ds=ds)
+    result = run_condition("test_run_id", SMALL_CFG, train_ds=ds, val_ds=ds, test_ds=ds)
     assert set(result.keys()) == {
         "coverage_95_y0",
         "coverage_95_y1",

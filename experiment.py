@@ -4,7 +4,7 @@ import json
 import logging
 import os
 from collections.abc import Callable
-from datetime import date
+from datetime import datetime
 
 import numpy as np
 import torch
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 def run_condition(
-    condition: str,
+    run_id: str,
     cfg: Config,
     train_ds: CausalDataset,
     val_ds: CausalDataset,
@@ -42,27 +42,27 @@ def run_condition(
 
     model = model_cls(cfg.model, cfg.diffusion).to(device)
     os.makedirs(cfg.train.checkpoint_dir, exist_ok=True)
-    ckpt_path = os.path.join(
-        cfg.train.checkpoint_dir, f"best_model_{condition}_{date.today().isoformat()}.pth"
-    )
 
     _train_loop(
-        model, train_loader, val_loader, cfg, device, ckpt_path, log_fn=log_fn, propnet=propnet
+        model,
+        train_loader,
+        val_loader,
+        cfg,
+        device,
+        run_id,
+        log_fn=log_fn,
+        propnet=propnet,
+        use_final_model=cfg.train.use_final_model,
+        early_stopping=cfg.train.early_stopping,
     )
-    result = evaluate(model, test_loader, cfg.train.K, device)
-    header = (
-        f"{'C95 Y0':>8} {'C95 Y1':>8} {'W95 Y0':>8} {'W95 Y1':>8}"
-        f" {'C99 Y0':>8} {'C99 Y1':>8} {'W99 Y0':>8} {'W99 Y1':>8}"
-        f" {'RMSE Y0':>8} {'RMSE Y1':>8} {'PEHE':>8}"
+    result = evaluate(
+        model,
+        test_loader,
+        cfg.train.K,
+        device,
+        pred_path=os.path.join("results", f"preds_{run_id}.csv"),
     )
-    row = (
-        f"{result['coverage_95_y0']:>8.4f} {result['coverage_95_y1']:>8.4f}"
-        f" {result['width_95_y0']:>8.4f} {result['width_95_y1']:>8.4f}"
-        f" {result['coverage_99_y0']:>8.4f} {result['coverage_99_y1']:>8.4f}"
-        f" {result['width_99_y0']:>8.4f} {result['width_99_y1']:>8.4f}"
-        f" {result['rmse_y0']:>8.4f} {result['rmse_y1']:>8.4f} {result['pehe']:>8.4f}"
-    )
-    logger.info("Test results:\n%s\n%s", header, row)
+    logger.info("Test results:\n%s", ", ".join(f"{k}: {v:>8.4f}" for k, v in result.items()))
     return result
 
 
@@ -75,6 +75,7 @@ def _fit_propnet(
     all_a = torch.cat([ds.a for ds in datasets])
     propnet = PropensityNet(n_unit_in=cfg.model.feature_dim, device=device)
     propnet.fit(all_x, all_a, log_fn=log_fn)
+    logger.info("PropensityNet fitted on all data: train+val+test.")
     propnet.eval()
     for p in propnet.parameters():
         p.requires_grad_(False)
@@ -96,10 +97,16 @@ if __name__ == "__main__":
     parser.add_argument("--config", default="config/ihdp.yaml")
     args = parser.parse_args()
 
+    run_time_str = datetime.now().isoformat(timespec="seconds").replace(":", "_")
+    run_id = f"{args.condition}_{run_time_str}"
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        handlers=[logging.StreamHandler(), logging.FileHandler(f"{args.condition}.log")],
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler(os.path.join("logs", f"{run_id}.log")),
+        ],
     )
 
     with open(args.config) as f:
@@ -119,26 +126,31 @@ if __name__ == "__main__":
         )
 
     with wandb.init(
-        project="diffusion-irregular-ehr",
-        id=f"{args.condition}_{date.today().isoformat()}",
-        config=cfg.model_dump(),
-        reinit=True,
+        project="diffusion-irregular-ehr", id=run_id, config=cfg.model_dump(), reinit=True
     ) as run:
+        run.define_metric("propnet/*", step_metric="propnet/step")
+        run.define_metric("train/*", step_metric="train/step")
+        run.define_metric("val/*", step_metric="train/step")
+
         propnet = None
         if model_cls is DiffPO:
             propnet = _fit_propnet(
-                cfg, train_ds, val_ds, test_ds, log_fn=lambda d, step: run.log(d, step=step)
+                cfg,
+                train_ds,
+                val_ds,
+                test_ds,
+                log_fn=lambda d, step: run.log({**d, "propnet/step": step}),
             )
 
         result = run_condition(
-            args.condition,
+            run_id,
             cfg,
             train_ds,
             val_ds,
             test_ds,
             model_cls,
             propnet,
-            log_fn=lambda d, step: run.log(d, step=step),
+            log_fn=lambda d, step: run.log({**d, "train/step": step}),
         )
         for k in (
             "pehe",
@@ -152,6 +164,6 @@ if __name__ == "__main__":
             result[k] *= y_std
         run.log({f"test/{k}": v for k, v in result.items()})
 
-    with open(f"results_{args.condition}.json", "w") as f:
+    with open(os.path.join("results", f"results_{run_id}.json"), "w") as f:
         json.dump(result, f, indent=2)
     print(result)

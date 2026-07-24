@@ -17,15 +17,17 @@ diffusion:
 train:
   epochs: 500
   batch_size: 128
-  lr: 0.0005            # DiffPO paper value
+  lr: 0.0005              # DiffPO paper value
   seed: 42
-  K: 50                 # PO samples at inference
-  patience: 20          # early stopping patience on total val ELBO
-  warmup_epochs: 50     # patience not armed until this epoch
+  K: 50                   # PO samples at inference
+  use_final_model: true   # use final model for evaluation (vs best val ELBO)
+  early_stopping: false
+  patience: 20            # if early stopping, patience on total val ELBO
+  warmup_epochs: 50       # patience not armed until this epoch
   checkpoint_dir: checkpoints
 
 data:
   path: data/ihdp
   replication: 1        # which IHDP NPCI replication to use (1-indexed, 1-10 available)
-  train_ratio: 0.7      # 70% train; val = test = (1 - train_ratio) / 2 = 15% each
+  train_ratio: 0.7      # 70% train
   test_ratio: 0.15      # 15% test; val inferred as remaining (1 - train_ratio - test_ratio = 0.15)
