@@ -27,6 +27,7 @@ def run_condition(
     train_ds: CausalDataset,
     val_ds: CausalDataset,
     test_ds: CausalDataset,
+    ckpt_path: str,
     model_cls: type[_DiffusionBase] = DiffPOCEVAE,
     propnet: PropensityNet | None = None,
     log_fn: Callable | None = None,
@@ -58,7 +59,7 @@ def run_condition(
     result = evaluate(
         model, test_loader, cfg.train.K, device, os.path.join("results", f"preds_{run_id}.csv")
     )
-    logger.info("Test results:\n%s", ", ".join(f"{k}: {v:.4f}" for k, v in result.items()))
+    logger.info("Test results:\n%s", ", ".join(f"{k}: {v:>8.4f}" for k, v in result.items()))
     return result
 
 
@@ -141,6 +142,9 @@ if __name__ == "__main__":
             train_ds,
             val_ds,
             test_ds,
+            os.path.join(
+                cfg.train.checkpoint_dir, f"best_model_{args.condition}_{run_time_str}.pth"
+            ),
             model_cls,
             propnet,
             log_fn=lambda d, step: run.log({**d, "train/step": step}),
