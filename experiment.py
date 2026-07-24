@@ -27,11 +27,9 @@ def run_condition(
     train_ds: CausalDataset,
     val_ds: CausalDataset,
     test_ds: CausalDataset,
-    ckpt_path: str,
     model_cls: type[_DiffusionBase] = DiffPOCEVAE,
     propnet: PropensityNet | None = None,
     log_fn: Callable | None = None,
-    pred_path: str | None = None,
 ) -> dict[str, float]:
     """Train one model on one dataset condition and return test metrics."""
     torch.manual_seed(cfg.train.seed)
@@ -101,7 +99,10 @@ if __name__ == "__main__":
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        handlers=[logging.StreamHandler(), logging.FileHandler(f"{run_id}.log")],
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler(os.path.join("logs", f"{run_id}.log")),
+        ],
     )
 
     with open(args.config) as f:
@@ -143,13 +144,9 @@ if __name__ == "__main__":
             train_ds,
             val_ds,
             test_ds,
-            os.path.join(
-                cfg.train.checkpoint_dir, f"best_model_{args.condition}_{run_time_str}.pth"
-            ),
             model_cls,
             propnet,
             log_fn=lambda d, step: run.log({**d, "train/step": step}),
-            pred_path=os.path.join("results", f"preds_{args.condition}_{run_time_str}.csv"),
         )
         for k in (
             "pehe",

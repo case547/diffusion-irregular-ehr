@@ -213,8 +213,6 @@ def _train_loop(
             if patience_left == 0:
                 logger.info("Early stopping at epoch %d.", epoch + 1)
                 break
-        else:
-            logger.info(log_msg)
 
         logger.info(log_msg)
 
