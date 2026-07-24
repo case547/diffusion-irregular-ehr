@@ -4,7 +4,7 @@ import json
 import logging
 import os
 from collections.abc import Callable
-from datetime import date
+from datetime import datetime
 
 import numpy as np
 import torch
@@ -43,7 +43,7 @@ def run_condition(
     model = model_cls(cfg.model, cfg.diffusion).to(device)
     os.makedirs(cfg.train.checkpoint_dir, exist_ok=True)
     ckpt_path = os.path.join(
-        cfg.train.checkpoint_dir, f"best_model_{condition}_{date.today().isoformat()}.pth"
+        cfg.train.checkpoint_dir, f"best_model_{condition}_{datetime.now().isoformat()}.pth"
     )
 
     _train_loop(
@@ -102,7 +102,7 @@ if __name__ == "__main__":
         handlers=[
             logging.StreamHandler(),
             logging.FileHandler(
-                os.path.join("logs", f"{args.condition}_{date.today().isoformat()}.log")
+                os.path.join("logs", f"{args.condition}_{datetime.now().isoformat()}.log")
             ),
         ],
     )
@@ -125,7 +125,7 @@ if __name__ == "__main__":
 
     with wandb.init(
         project="diffusion-irregular-ehr",
-        id=f"{args.condition}_{date.today().isoformat()}",
+        id=f"{args.condition}_{datetime.now().isoformat()}",
         config=cfg.model_dump(),
         reinit=True,
     ) as run:
@@ -158,7 +158,7 @@ if __name__ == "__main__":
         run.log({f"test/{k}": v for k, v in result.items()})
 
     with open(
-        os.path.join("results", f"results_{args.condition}_{date.today().isoformat()}.json"),
+        os.path.join("results", f"results_{args.condition}_{datetime.now().isoformat()}.json"),
         "w",
     ) as f:
         json.dump(result, f, indent=2)
