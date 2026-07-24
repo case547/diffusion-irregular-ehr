@@ -17,12 +17,13 @@ diffusion:
 train:
   epochs: 500
   batch_size: 128
-  lr: 0.0005            # DiffPO paper value
+  lr: 0.0005              # DiffPO paper value
   seed: 42
-  K: 50                 # PO samples at inference
+  K: 50                   # PO samples at inference
+  use_final_model: true   # use final model for evaluation (vs best val ELBO)
   early_stopping: false
-  patience: 20          # if early stopping, patience on total val ELBO
-  warmup_epochs: 50     # patience not armed until this epoch
+  patience: 20            # if early stopping, patience on total val ELBO
+  warmup_epochs: 50       # patience not armed until this epoch
   checkpoint_dir: checkpoints
 
 data:

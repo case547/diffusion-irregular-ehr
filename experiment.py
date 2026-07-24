@@ -22,15 +22,14 @@ logger = logging.getLogger(__name__)
 
 
 def run_condition(
+    run_id: str,
     cfg: Config,
     train_ds: CausalDataset,
     val_ds: CausalDataset,
     test_ds: CausalDataset,
-    ckpt_path: str,
     model_cls: type[_DiffusionBase] = DiffPOCEVAE,
     propnet: PropensityNet | None = None,
     log_fn: Callable | None = None,
-    pred_path: str | None = None,
 ) -> dict[str, float]:
     """Train one model on one dataset condition and return test metrics."""
     torch.manual_seed(cfg.train.seed)
@@ -50,12 +49,19 @@ def run_condition(
         val_loader,
         cfg,
         device,
-        ckpt_path,
+        run_id,
         log_fn=log_fn,
         propnet=propnet,
+        use_final_model=cfg.train.use_final_model,
         early_stopping=cfg.train.early_stopping,
     )
-    result = evaluate(model, test_loader, cfg.train.K, device, pred_path=pred_path)
+    result = evaluate(
+        model,
+        test_loader,
+        cfg.train.K,
+        device,
+        pred_path=os.path.join("results", f"preds_{run_id}.csv"),
+    )
     logger.info("Test results:\n%s", ", ".join(f"{k}: {v:>8.4f}" for k, v in result.items()))
     return result
 
@@ -92,13 +98,14 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     run_time_str = datetime.now().isoformat(timespec="seconds").replace(":", "_")
+    run_id = f"{args.condition}_{run_time_str}"
 
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler(os.path.join("logs", f"{args.condition}_{run_time_str}.log")),
+            logging.FileHandler(os.path.join("logs", f"{run_id}.log")),
         ],
     )
 
@@ -119,10 +126,7 @@ if __name__ == "__main__":
         )
 
     with wandb.init(
-        project="diffusion-irregular-ehr",
-        id=f"{args.condition}_{run_time_str}",
-        config=cfg.model_dump(),
-        reinit=True,
+        project="diffusion-irregular-ehr", id=run_id, config=cfg.model_dump(), reinit=True
     ) as run:
         run.define_metric("propnet/*", step_metric="propnet/step")
         run.define_metric("train/*", step_metric="train/step")
@@ -139,19 +143,14 @@ if __name__ == "__main__":
             )
 
         result = run_condition(
+            run_id,
             cfg,
             train_ds,
             val_ds,
             test_ds,
-            os.path.join(
-                cfg.train.checkpoint_dir, f"best_model_{args.condition}_{run_time_str}.pth"
-            ),
             model_cls,
             propnet,
             log_fn=lambda d, step: run.log({**d, "train/step": step}),
-            pred_path=os.path.join(
-                "results", f"preds_{args.condition}_{run_time_str}.csv"
-            ),
         )
         for k in (
             "pehe",
@@ -165,8 +164,6 @@ if __name__ == "__main__":
             result[k] *= y_std
         run.log({f"test/{k}": v for k, v in result.items()})
 
-    with open(
-        os.path.join("results", f"results_{args.condition}_{run_time_str}.json"), "w"
-    ) as f:
+    with open(os.path.join("results", f"results_{run_id}.json"), "w") as f:
         json.dump(result, f, indent=2)
     print(result)

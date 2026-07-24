@@ -2,6 +2,7 @@
 
 import csv
 import logging
+import os
 from collections import defaultdict
 from collections.abc import Callable
 
@@ -135,9 +136,10 @@ def _train_loop(
     val_loader: DataLoader,
     cfg: Config,
     device: torch.device,
-    ckpt_path: str,
+    run_id: str,
     log_fn: Callable | None = None,
     propnet: PropensityNet | None = None,
+    use_final_model: bool = True,
     early_stopping: bool = False,
 ) -> None:
     """MultiStepLR training with early stopping on total val ELBO.
@@ -155,6 +157,7 @@ def _train_loop(
 
     best_val_elbo = float("inf")
     patience_left = cfg.train.patience
+    ckpt_path = os.path.join(cfg.train.checkpoint_dir, f"best_model_{run_id}.pth")
 
     for epoch in range(cfg.train.epochs):
         model.train()
@@ -187,21 +190,31 @@ def _train_loop(
             log_fn(log, epoch + 1)
 
         val_loss = val_comps["total_loss"]
-        log_msg = f"Epoch {epoch + 1}: val_elbo {val_loss:.4f}"
+        log_msg = (
+            f"Epoch {epoch + 1}:"
+            f" train_elbo {epoch_losses['total_loss'] / n_batches:.4f},"
+            f" val_elbo {val_loss:.4f}"
+        )
 
         if val_loss < best_val_elbo:
             best_val_elbo = val_loss
             torch.save(model.state_dict(), ckpt_path)
             if early_stopping and epoch >= cfg.train.warmup_epochs:
                 patience_left = cfg.train.patience
-            logger.info(f"{log_msg} ✓ (saved)")
+            log_msg += " ✓ (saved)"
         elif early_stopping and epoch >= cfg.train.warmup_epochs:
             patience_left -= 1
-            logger.info(f"{log_msg} (patience {patience_left}/{cfg.train.patience})")
+            log_msg += f" (patience {patience_left}/{cfg.train.patience})"
             if patience_left == 0:
                 logger.info("Early stopping.")
                 break
-        else:
-            logger.info(log_msg)
 
-    model.load_state_dict(torch.load(ckpt_path, map_location=device))
+        logger.info(log_msg)
+
+    torch.save(
+        model.state_dict(), os.path.join(cfg.train.checkpoint_dir, f"final_model_{run_id}.pth")
+    )
+
+    if not use_final_model:
+        logger.info("Loading best model from checkpoint for evaluation.")
+        model.load_state_dict(torch.load(ckpt_path, map_location=device))
