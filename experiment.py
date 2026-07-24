@@ -129,10 +129,18 @@ if __name__ == "__main__":
         config=cfg.model_dump(),
         reinit=True,
     ) as run:
+        run.define_metric("propensity/*", step_metric="propnet/step")
+        run.define_metric("train/*", step_metric="train/step")
+        run.define_metric("val/*", step_metric="train/step")
+
         propnet = None
         if model_cls is DiffPO:
             propnet = _fit_propnet(
-                cfg, train_ds, val_ds, test_ds, log_fn=lambda d, step: run.log(d, step=step)
+                cfg,
+                train_ds,
+                val_ds,
+                test_ds,
+                log_fn=lambda d, step: run.log({**d, "propnet/step": step}),
             )
 
         result = run_condition(
@@ -143,7 +151,7 @@ if __name__ == "__main__":
             test_ds,
             model_cls,
             propnet,
-            log_fn=lambda d, step: run.log(d, step=step),
+            log_fn=lambda d, step: run.log({**d, "train/step": step}),
         )
         for k in (
             "pehe",
