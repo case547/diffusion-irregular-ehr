@@ -1,5 +1,6 @@
 """Shared training utilities: val_loss, evaluate, _train_loop."""
 
+import csv
 import logging
 from collections import defaultdict
 from collections.abc import Callable
@@ -26,6 +27,7 @@ def calculate_val_loss(
     model.eval()
     totals: dict = defaultdict(float)
     n = 0
+
     with torch.no_grad():
         for batch in loader:
             x = batch["x"].to(device)
@@ -33,19 +35,29 @@ def calculate_val_loss(
             y = batch["y"].to(device)
             y_cf = batch["y_cf"].to(device)
             comps = model.compute_loss(x, a, y, y_cf, propnet=propnet)
+
             for k, v in comps.items():
                 totals[k] += v.item()
             totals["total_loss"] += model.total_loss(comps).item()
             n += 1
+
     return {k: v / n for k, v in totals.items()}
 
 
 def evaluate(
-    model: _DiffusionBase, loader: DataLoader, K: int, device: torch.device
+    model: _DiffusionBase,
+    loader: DataLoader,
+    K: int,
+    device: torch.device,
+    pred_path: str | None = None,
 ) -> dict[str, float]:
-    """Test-time evaluation: generate K PO samples and compute coverage, RMSE, PEHE."""
+    """Test-time evaluation: generate K PO samples and compute coverage, RMSE, PEHE.
+
+    pred_path: if given, writes per-subject summary stats to a CSV for diagnostics.
+    """
     model.eval()
     all_y0, all_y1, all_mu0, all_mu1 = [], [], [], []
+
     with torch.no_grad():
         for batch in loader:
             x = batch["x"].to(device)
@@ -55,13 +67,53 @@ def evaluate(
             all_y1.append(y1_s.cpu())
             all_mu0.append(batch["mu0"])
             all_mu1.append(batch["mu1"])
+
     y0 = torch.cat(all_y0)
     y1 = torch.cat(all_y1)
     mu0 = torch.cat(all_mu0)
     mu1 = torch.cat(all_mu1)
+
+    if pred_path is not None:
+        lo0 = torch.quantile(y0, 0.025, dim=1)
+        hi0 = torch.quantile(y0, 0.975, dim=1)
+        lo1 = torch.quantile(y1, 0.025, dim=1)
+        hi1 = torch.quantile(y1, 0.975, dim=1)
+        with open(pred_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(
+                [
+                    "mu0",
+                    "mu1",
+                    "y0_mean",
+                    "y1_mean",
+                    "y0_std",
+                    "y1_std",
+                    "y0_lo95",
+                    "y0_hi95",
+                    "y1_lo95",
+                    "y1_hi95",
+                ]
+            )
+            for i in range(y0.shape[0]):
+                writer.writerow(
+                    [
+                        mu0[i].item(),
+                        mu1[i].item(),
+                        y0[i].mean().item(),
+                        y1[i].mean().item(),
+                        y0[i].std().item(),
+                        y1[i].std().item(),
+                        lo0[i].item(),
+                        hi0[i].item(),
+                        lo1[i].item(),
+                        hi1[i].item(),
+                    ]
+                )
+
     cov0_95, cov1_95, w0_95, w1_95 = coverage(y0, y1, mu0, mu1, level=0.95)
     cov0_99, cov1_99, w0_99, w1_99 = coverage(y0, y1, mu0, mu1, level=0.99)
     r0, r1 = rmse(y0, y1, mu0, mu1)
+
     return {
         "coverage_95_y0": cov0_95,
         "coverage_95_y1": cov1_95,
@@ -108,6 +160,7 @@ def _train_loop(
         model.train()
         epoch_losses: dict = defaultdict(float)
         n_batches = 0
+
         for batch in train_loader:
             x = batch["x"].to(device)
             a = batch["a"].to(device)
@@ -119,6 +172,7 @@ def _train_loop(
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
+
             for k, v in comps.items():
                 epoch_losses[k] += v.item()
             epoch_losses["total_loss"] += loss.item()
