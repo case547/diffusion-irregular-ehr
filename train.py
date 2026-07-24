@@ -15,6 +15,8 @@ from src.metrics import coverage, pehe, rmse
 from src.model import _DiffusionBase
 from src.propensity import PropensityNet
 
+logger = logging.getLogger(__name__)
+
 
 def calculate_val_loss(
     model: _DiffusionBase,
@@ -155,7 +157,6 @@ def _train_loop(
         optimizer, milestones=[p0, p1, p2, p3], gamma=0.1
     )
 
-    logger = logging.getLogger(__name__)
     best_val_elbo = float("inf")
     patience_left = cfg.train.patience
     ckpt_path = os.path.join(cfg.train.checkpoint_dir, f"best_model_{run_id}.pth")
@@ -198,7 +199,7 @@ def _train_loop(
         if val_loss < best_val_elbo:
             best_val_elbo = val_loss
             torch.save(model.state_dict(), ckpt_path)
-            if epoch >= cfg.train.warmup_epochs:
+            if early_stopping and epoch >= cfg.train.warmup_epochs:
                 patience_left = cfg.train.patience
             log_msg += " ✓ (saved)"
         elif early_stopping and epoch >= cfg.train.warmup_epochs:
@@ -207,6 +208,8 @@ def _train_loop(
             if patience_left == 0:
                 logger.info("Early stopping at epoch %d.", epoch + 1)
                 break
+        else:
+            logger.info(log_msg)
 
         logger.info(log_msg)
 
