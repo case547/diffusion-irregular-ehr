@@ -28,6 +28,7 @@ def calculate_val_loss(
     model.eval()
     totals: dict = defaultdict(float)
     n = 0
+
     with torch.no_grad():
         for batch in loader:
             x = batch["x"].to(device)
@@ -35,10 +36,12 @@ def calculate_val_loss(
             y = batch["y"].to(device)
             y_cf = batch["y_cf"].to(device)
             comps = model.compute_loss(x, a, y, y_cf, propnet=propnet)
+
             for k, v in comps.items():
                 totals[k] += v.item()
             totals["total_loss"] += model.total_loss(comps).item()
             n += 1
+
     return {k: v / n for k, v in totals.items()}
 
 
@@ -165,6 +168,7 @@ def _train_loop(
         model.train()
         epoch_losses: dict = defaultdict(float)
         n_batches = 0
+
         for batch in train_loader:
             x = batch["x"].to(device)
             a = batch["a"].to(device)
@@ -176,6 +180,7 @@ def _train_loop(
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
+
             for k, v in comps.items():
                 epoch_losses[k] += v.item()
             epoch_losses["total_loss"] += loss.item()

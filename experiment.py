@@ -31,6 +31,7 @@ def run_condition(
     model_cls: type[_DiffusionBase] = DiffPOCEVAE,
     propnet: PropensityNet | None = None,
     log_fn: Callable | None = None,
+    pred_path: str | None = None,
 ) -> dict[str, float]:
     """Train one model on one dataset condition and return test metrics."""
     torch.manual_seed(cfg.train.seed)
@@ -148,6 +149,7 @@ if __name__ == "__main__":
             model_cls,
             propnet,
             log_fn=lambda d, step: run.log({**d, "train/step": step}),
+            pred_path=os.path.join("results", f"preds_{args.condition}_{run_time_str}.csv"),
         )
         for k in (
             "pehe",
