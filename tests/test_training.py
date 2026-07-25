@@ -118,7 +118,7 @@ def test_checkpoint_saved(tmp_path):
     model = DiffPOCEVAE(cfg.model, cfg.diffusion)
     device = torch.device("cpu")
     os.makedirs(cfg.train.checkpoint_dir, exist_ok=True)
-    run_id = "test_run"
+    run_id = "pytest_run"
     _train_loop(model, loader, loader, cfg, device, run_id)
     ckpt_path = os.path.join(cfg.train.checkpoint_dir, f"best_model_{run_id}.pth")
     assert os.path.exists(ckpt_path)

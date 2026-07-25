@@ -55,7 +55,13 @@ def run_condition(
         use_final_model=cfg.train.use_final_model,
         early_stopping=cfg.train.early_stopping,
     )
-    result = evaluate(model, test_loader, cfg.train.K, device)
+    result = evaluate(
+        model,
+        test_loader,
+        cfg.train.K,
+        device,
+        os.path.join("results", f"preds_{run_id}.csv"),
+    )
     header = (
         f"{'C95 Y0':>8} {'C95 Y1':>8} {'W95 Y0':>8} {'W95 Y1':>8}"
         f" {'C99 Y0':>8} {'C99 Y1':>8} {'W99 Y0':>8} {'W99 Y1':>8}"
@@ -166,6 +172,6 @@ if __name__ == "__main__":
             result[k] *= y_std
         run.log({f"test/{k}": v for k, v in result.items()})
 
-    with open(f"results_{run_id}.json", "w") as f:
+    with open(os.path.join("results", f"results_{run_id}.json"), "w") as f:
         json.dump(result, f, indent=2)
     print(result)
