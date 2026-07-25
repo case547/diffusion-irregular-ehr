@@ -44,7 +44,16 @@ def run_condition(
     os.makedirs(cfg.train.checkpoint_dir, exist_ok=True)
 
     _train_loop(
-        model, train_loader, val_loader, cfg, device, run_id, log_fn=log_fn, propnet=propnet
+        model,
+        train_loader,
+        val_loader,
+        cfg,
+        device,
+        run_id,
+        log_fn=log_fn,
+        propnet=propnet,
+        use_final_model=cfg.train.use_final_model,
+        early_stopping=cfg.train.early_stopping,
     )
     result = evaluate(model, test_loader, cfg.train.K, device)
     header = (

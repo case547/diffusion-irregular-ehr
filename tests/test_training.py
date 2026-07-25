@@ -104,6 +104,8 @@ def test_checkpoint_saved(tmp_path):
             lr=1e-3,
             seed=2,
             K=2,
+            use_final_model=False,
+            early_stopping=True,
             patience=10,
             warmup_epochs=0,
             checkpoint_dir=str(tmp_path),
