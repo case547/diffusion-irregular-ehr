@@ -4,7 +4,7 @@ import json
 import logging
 import os
 from collections.abc import Callable
-from datetime import date
+from datetime import datetime
 
 import numpy as np
 import torch
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 def run_condition(
-    condition: str,
+    run_id: str,
     cfg: Config,
     train_ds: CausalDataset,
     val_ds: CausalDataset,
@@ -42,12 +42,9 @@ def run_condition(
 
     model = model_cls(cfg.model, cfg.diffusion).to(device)
     os.makedirs(cfg.train.checkpoint_dir, exist_ok=True)
-    ckpt_path = os.path.join(
-        cfg.train.checkpoint_dir, f"best_model_{condition}_{date.today().isoformat()}.pth"
-    )
 
     _train_loop(
-        model, train_loader, val_loader, cfg, device, ckpt_path, log_fn=log_fn, propnet=propnet
+        model, train_loader, val_loader, cfg, device, run_id, log_fn=log_fn, propnet=propnet
     )
     result = evaluate(model, test_loader, cfg.train.K, device)
     header = (
@@ -82,8 +79,8 @@ def _fit_propnet(
 
 
 CONDITION_MAP = {
-    "diffpo_full": (DiffPO, False),
-    "diffpo_conf": (DiffPO, True),
+    "naive_full": (DiffPO, False),
+    "naive_conf": (DiffPO, True),
     "hybrid_full": (DiffPOCEVAE, False),
     "hybrid_conf": (DiffPOCEVAE, True),
 }
@@ -96,10 +93,13 @@ if __name__ == "__main__":
     parser.add_argument("--config", default="config/ihdp.yaml")
     args = parser.parse_args()
 
+    run_time_str = datetime.now().isoformat(timespec="seconds").replace(":", "_")
+    run_id = f"{args.condition}_{run_time_str}"
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        handlers=[logging.StreamHandler(), logging.FileHandler(f"{args.condition}.log")],
+        handlers=[logging.StreamHandler(), logging.FileHandler(f"{run_id}.log")],
     )
 
     with open(args.config) as f:
@@ -119,10 +119,7 @@ if __name__ == "__main__":
         )
 
     with wandb.init(
-        project="diffusion-irregular-ehr",
-        id=f"{args.condition}_{date.today().isoformat()}",
-        config=cfg.model_dump(),
-        reinit=True,
+        project="diffusion-irregular-ehr", id=run_id, config=cfg.model_dump(), reinit=True
     ) as run:
         run.define_metric("propnet/*", step_metric="propnet/step")
         run.define_metric("train/*", step_metric="train/step")
@@ -139,7 +136,7 @@ if __name__ == "__main__":
             )
 
         result = run_condition(
-            args.condition,
+            run_id,
             cfg,
             train_ds,
             val_ds,
@@ -160,6 +157,6 @@ if __name__ == "__main__":
             result[k] *= y_std
         run.log({f"test/{k}": v for k, v in result.items()})
 
-    with open(f"results_{args.condition}.json", "w") as f:
+    with open(f"results_{run_id}.json", "w") as f:
         json.dump(result, f, indent=2)
     print(result)

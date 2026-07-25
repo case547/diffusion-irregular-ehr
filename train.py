@@ -1,6 +1,7 @@
 """Shared training utilities: val_loss, evaluate, _train_loop."""
 
 import logging
+import os
 from collections import defaultdict
 from collections.abc import Callable
 
@@ -81,7 +82,7 @@ def _train_loop(
     val_loader: DataLoader,
     cfg: Config,
     device: torch.device,
-    ckpt_path: str,
+    run_id: str,
     log_fn: Callable | None = None,
     propnet: PropensityNet | None = None,
 ) -> None:
@@ -101,6 +102,7 @@ def _train_loop(
     logger = logging.getLogger(__name__)
     best_val_elbo = float("inf")
     patience_left = cfg.train.patience
+    ckpt_path = os.path.join(cfg.train.checkpoint_dir, f"best_model_{run_id}.pth")
 
     for epoch in range(cfg.train.epochs):
         model.train()
