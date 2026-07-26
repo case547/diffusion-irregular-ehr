@@ -15,6 +15,8 @@ from src.metrics import coverage, pehe, rmse
 from src.model import _DiffusionBase
 from src.propensity import PropensityNet
 
+logger = logging.getLogger(__name__)
+
 
 def calculate_val_loss(
     model: _DiffusionBase,
@@ -26,6 +28,7 @@ def calculate_val_loss(
     model.eval()
     totals: dict = defaultdict(float)
     n = 0
+
     with torch.no_grad():
         for batch in loader:
             x = batch["x"].to(device)
@@ -33,10 +36,12 @@ def calculate_val_loss(
             y = batch["y"].to(device)
             y_cf = batch["y_cf"].to(device)
             comps = model.compute_loss(x, a, y, y_cf, propnet=propnet)
+
             for k, v in comps.items():
                 totals[k] += v.item()
             totals["total_loss"] += model.total_loss(comps).item()
             n += 1
+
     return {k: v / n for k, v in totals.items()}
 
 
@@ -155,7 +160,6 @@ def _train_loop(
         optimizer, milestones=[p0, p1, p2, p3], gamma=0.1
     )
 
-    logger = logging.getLogger(__name__)
     best_val_elbo = float("inf")
     patience_left = cfg.train.patience
     ckpt_path = os.path.join(cfg.train.checkpoint_dir, f"best_model_{run_id}.pth")
@@ -164,6 +168,7 @@ def _train_loop(
         model.train()
         epoch_losses: dict = defaultdict(float)
         n_batches = 0
+
         for batch in train_loader:
             x = batch["x"].to(device)
             a = batch["a"].to(device)
@@ -175,6 +180,7 @@ def _train_loop(
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
+
             for k, v in comps.items():
                 epoch_losses[k] += v.item()
             epoch_losses["total_loss"] += loss.item()
@@ -186,7 +192,7 @@ def _train_loop(
         if log_fn is not None:
             log = {f"train/{k}": v / n_batches for k, v in epoch_losses.items()}
             log.update({f"val/{k}": v for k, v in val_comps.items()})
-            log_fn(log, epoch)
+            log_fn(log, epoch + 1)
 
         val_loss = val_comps["total_loss"]
         log_msg = (
@@ -198,7 +204,7 @@ def _train_loop(
         if val_loss < best_val_elbo:
             best_val_elbo = val_loss
             torch.save(model.state_dict(), ckpt_path)
-            if epoch >= cfg.train.warmup_epochs:
+            if early_stopping and epoch >= cfg.train.warmup_epochs:
                 patience_left = cfg.train.patience
             log_msg += " ✓ (saved)"
         elif early_stopping and epoch >= cfg.train.warmup_epochs:
