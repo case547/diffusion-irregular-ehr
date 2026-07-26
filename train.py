@@ -2,9 +2,9 @@
 
 import csv
 import logging
-import os
 from collections import defaultdict
 from collections.abc import Callable
+from pathlib import Path
 
 import torch
 from torch.optim import Adam
@@ -50,7 +50,7 @@ def evaluate(
     loader: DataLoader,
     K: int,
     device: torch.device,
-    preds_csv_path: str | None = None,
+    preds_csv_path: Path | None = None,
 ) -> dict[str, float]:
     """Test-time evaluation: generate K PO samples and compute coverage, RMSE, PEHE.
 
@@ -80,9 +80,7 @@ def evaluate(
         lo1 = torch.quantile(y1, 0.025, dim=1)
         hi1 = torch.quantile(y1, 0.975, dim=1)
 
-        preds_dir = os.path.dirname(preds_csv_path)
-        if preds_dir:
-            os.makedirs(preds_dir, exist_ok=True)
+        preds_csv_path.parent.mkdir(parents=True, exist_ok=True)
 
         with open(preds_csv_path, "w", newline="") as f:
             writer = csv.writer(f)
@@ -162,7 +160,7 @@ def _train_loop(
 
     best_val_elbo = float("inf")
     patience_left = cfg.train.patience
-    ckpt_path = os.path.join(cfg.train.checkpoint_dir, f"best_model_{run_id}.pth")
+    ckpt_path = Path(cfg.train.checkpoint_dir) / f"best_model_{run_id}.pth"
 
     for epoch in range(cfg.train.epochs):
         model.train()
@@ -217,7 +215,7 @@ def _train_loop(
         logger.info(log_msg)
 
     torch.save(
-        model.state_dict(), os.path.join(cfg.train.checkpoint_dir, f"final_model_{run_id}.pth")
+        model.state_dict(), Path(cfg.train.checkpoint_dir) / f"final_model_{run_id}.pth"
     )
 
     if not use_final_model:

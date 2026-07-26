@@ -1,4 +1,4 @@
-import os
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -57,7 +57,7 @@ def load_ihdp(
     import pandas as pd
     from sklearn.model_selection import train_test_split
 
-    path = os.path.join(data_dir, "with_race", f"ihdp_with_race_{replication}.csv")
+    path = Path(data_dir) / "with_race" / f"ihdp_with_race_{replication}.csv"
     df = pd.read_csv(path)
 
     a = df["treat"].values.astype(np.float32)
@@ -139,7 +139,7 @@ def load_acic(
     import pandas as pd
     from sklearn.model_selection import train_test_split
 
-    path = os.path.join(data_dir, f"{sheet_id}.csv")
+    path = Path(data_dir) / f"{sheet_id}.csv"
     data = pd.read_csv(path).values.astype(np.float32)
 
     a = data[:, 0]
