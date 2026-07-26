@@ -10,7 +10,7 @@ diffusion:
   beta_end: 0.5         # DiffPO value for tabular PO data
   schedule: quad        # quadratic; DiffPO default for tabular PO data
   embedding_dim: 32     # sinusoidal time embedding dim; matched to block_dim to avoid 4x reduction in diffusion_projection
-  block_dim: 32         # I/O width of cond_proj, mapping_noise, and each ResidualBlock; proportionate to latent_dim=20 on IHDP (~747 subjects)
+  block_dim: 32         # I/O width of cond_proj, mapping_noise, and each ResidualBlock; proportionate to latent_dim=20 on IHDP (~985 subjects)
   hidden_dim: 32        # output head width (output_projection1/2, y0/y1 layers); contracts like DiffPO (cond_dim -> hidden_dim)
   num_blocks: 4         # number of residual blocks
 
