@@ -1,5 +1,6 @@
 """Shared training utilities: val_loss, evaluate, _train_loop."""
 
+import csv
 import logging
 import os
 from collections import defaultdict
@@ -40,11 +41,19 @@ def calculate_val_loss(
 
 
 def evaluate(
-    model: _DiffusionBase, loader: DataLoader, K: int, device: torch.device
+    model: _DiffusionBase,
+    loader: DataLoader,
+    K: int,
+    device: torch.device,
+    preds_csv_path: str | None = None,
 ) -> dict[str, float]:
-    """Test-time evaluation: generate K PO samples and compute coverage, RMSE, PEHE."""
+    """Test-time evaluation: generate K PO samples and compute coverage, RMSE, PEHE.
+
+    preds_csv_path: if given, writes per-subject summary stats to a CSV for diagnostics.
+    """
     model.eval()
     all_y0, all_y1, all_mu0, all_mu1 = [], [], [], []
+
     with torch.no_grad():
         for batch in loader:
             x = batch["x"].to(device)
@@ -54,13 +63,58 @@ def evaluate(
             all_y1.append(y1_s.cpu())
             all_mu0.append(batch["mu0"])
             all_mu1.append(batch["mu1"])
+
     y0 = torch.cat(all_y0)
     y1 = torch.cat(all_y1)
     mu0 = torch.cat(all_mu0)
     mu1 = torch.cat(all_mu1)
+
+    if preds_csv_path is not None:
+        lo0 = torch.quantile(y0, 0.025, dim=1)
+        hi0 = torch.quantile(y0, 0.975, dim=1)
+        lo1 = torch.quantile(y1, 0.025, dim=1)
+        hi1 = torch.quantile(y1, 0.975, dim=1)
+
+        preds_dir = os.path.dirname(preds_csv_path)
+        if preds_dir:
+            os.makedirs(preds_dir, exist_ok=True)
+
+        with open(preds_csv_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(
+                [
+                    "mu0",
+                    "mu1",
+                    "y0_mean",
+                    "y1_mean",
+                    "y0_std",
+                    "y1_std",
+                    "y0_lo95",
+                    "y0_hi95",
+                    "y1_lo95",
+                    "y1_hi95",
+                ]
+            )
+            for i in range(y0.shape[0]):
+                writer.writerow(
+                    [
+                        mu0[i].item(),
+                        mu1[i].item(),
+                        y0[i].mean().item(),
+                        y1[i].mean().item(),
+                        y0[i].std().item(),
+                        y1[i].std().item(),
+                        lo0[i].item(),
+                        hi0[i].item(),
+                        lo1[i].item(),
+                        hi1[i].item(),
+                    ]
+                )
+
     cov0_95, cov1_95, w0_95, w1_95 = coverage(y0, y1, mu0, mu1, level=0.95)
     cov0_99, cov1_99, w0_99, w1_99 = coverage(y0, y1, mu0, mu1, level=0.99)
     r0, r1 = rmse(y0, y1, mu0, mu1)
+
     return {
         "coverage_95_y0": cov0_95,
         "coverage_95_y1": cov1_95,

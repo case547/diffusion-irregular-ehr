@@ -219,3 +219,9 @@ __marimo__/
 
 # Plans
 **/superpowers/plans/
+
+# Runs
+checkpoints/
+logs/
+results/
+wandb/
