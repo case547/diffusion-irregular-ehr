@@ -160,5 +160,5 @@ if __name__ == "__main__":
         run.log({f"test/{k}": v for k, v in result.items()})
 
     with open(Path("results") / f"results_{run_id}.json", "w") as f:
-        json.dump(result, f, indent=2)
+        json.dump(cfg.model_dump() | result, f, indent=2)
     print(result)
