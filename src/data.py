@@ -41,7 +41,14 @@ def load_ihdp(
     test_ratio: float = 0.15,
 ):
     """
-    Load one NPCI replication from data_dir/with_race/ihdp_with_race_{replication}.csv.
+    Load one replication from data_dir/full/ihdp_full_{replication}.csv.
+
+    This is the full 985-subject IHDP population (~38% treated), reconstructed by
+    data/ihdp/make_full_ihdp.py to keep Hill's response-surface-B data-generating
+    process while including all treated infants -- unlike Hill's NPCI benchmark,
+    which excludes every treated infant with a non-white mother (747 subjects,
+    ~19% treated), inducing a treatment imbalance responsible for catastrophic
+    diffusion-model failure on the standard benchmark.
 
     CSV columns (header row present):
         treat, y_factual, y_cfactual, mu0, mu1,
@@ -51,13 +58,13 @@ def load_ihdp(
     Split:
         train (train_ratio) vs valtest (1-train_ratio), then test (test_ratio) from valtest;
         val = 1 - train_ratio - test_ratio -> 70/15/15 (random_state=1).
-    Both splits stratified on treatment to preserve ~20% treated rate in each fold.
+    Both splits stratified on treatment to preserve ~38% treated rate in each fold.
     Outcomes normalised to training-split mean/std.
     """
     import pandas as pd
     from sklearn.model_selection import train_test_split
 
-    path = Path(data_dir) / "with_race" / f"ihdp_with_race_{replication}.csv"
+    path = Path(data_dir) / "full" / f"ihdp_full_{replication}.csv"
     df = pd.read_csv(path)
 
     a = df["treat"].values.astype(np.float32)
@@ -105,8 +112,8 @@ def load_ihdp(
 def make_ihdp_confounded(ds: CausalDataset) -> CausalDataset:
     """Flip treatment where ds.confounder == 1 (momblack). x unchanged.
 
-    momblack is not in x1-x25, but is partially recoverable via proxy variables
-    (site indicators, maternal education). Outcomes and ground-truth POs unchanged.
+    momblack is not in x1-x25, but is partially recoverable via proxy variables.
+    Outcomes and ground-truth POs unchanged.
     """
     assert ds.confounder is not None, "ds.confounder is None; load via load_ihdp"
     a = ds.a.numpy().copy()
