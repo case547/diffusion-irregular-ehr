@@ -24,7 +24,7 @@ jobs:
 
       - name: 🔍 Lint check
         if: always()
-        run: uv run ruff check --output-format=github --extend-exclude *.ipynb
+        run: uv run ruff check --output-format=github --extend-exclude "*.ipynb"
 
       - name: 🎨 Format check
         if: always()
