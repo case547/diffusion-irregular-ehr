@@ -2,9 +2,9 @@
 
 import json
 import logging
-import os
 from collections.abc import Callable
 from datetime import datetime
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -41,7 +41,7 @@ def run_condition(
     test_loader = DataLoader(test_ds, batch_size=cfg.train.batch_size)
 
     model = model_cls(cfg.model, cfg.diffusion).to(device)
-    os.makedirs(cfg.train.checkpoint_dir, exist_ok=True)
+    Path(cfg.train.checkpoint_dir).mkdir(parents=True, exist_ok=True)
 
     _train_loop(
         model,
@@ -56,7 +56,7 @@ def run_condition(
         early_stopping=cfg.train.early_stopping,
     )
     result = evaluate(
-        model, test_loader, cfg.train.K, device, os.path.join("results", f"preds_{run_id}.csv")
+        model, test_loader, cfg.train.K, device, Path("results") / f"preds_{run_id}.csv"
     )
     logger.info("Test results:\n%s", ", ".join(f"{k}: {v:>8.4f}" for k, v in result.items()))
     return result
@@ -96,13 +96,12 @@ if __name__ == "__main__":
     run_time_str = datetime.now().isoformat(timespec="seconds").replace(":", "_")
     run_id = f"{args.condition}_{run_time_str}"
 
+    log_path = Path("logs") / f"{run_id}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        handlers=[
-            logging.StreamHandler(),
-            logging.FileHandler(os.path.join("logs", f"{run_id}.log")),
-        ],
+        handlers=[logging.StreamHandler(), logging.FileHandler(log_path)],
     )
 
     with open(args.config) as f:
@@ -160,6 +159,6 @@ if __name__ == "__main__":
             result[k] *= y_std
         run.log({f"test/{k}": v for k, v in result.items()})
 
-    with open(os.path.join("results", f"results_{run_id}.json"), "w") as f:
+    with open(Path("results") / f"results_{run_id}.json", "w") as f:
         json.dump(result, f, indent=2)
     print(result)
