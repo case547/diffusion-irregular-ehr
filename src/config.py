@@ -10,8 +10,8 @@ class ModelConfig(BaseModel):
 
 class DiffusionConfig(BaseModel):
     num_steps: int
-    beta_start: float
-    beta_end: float
+    beta_start: float | None
+    beta_end: float | None
     schedule: str
     embedding_dim: int
     block_dim: int
