@@ -30,7 +30,7 @@ def run_condition(
     model_cls: type[_DiffusionBase] = DiffPOCEVAE,
     propnet: PropensityNet | None = None,
     log_fn: Callable | None = None,
-) -> dict[str, float]:
+) -> tuple[dict[str, float], dict[str, float]]:
     """Train one model on one dataset condition and return test metrics."""
     torch.manual_seed(cfg.train.seed)
     np.random.seed(cfg.train.seed)
@@ -55,11 +55,20 @@ def run_condition(
         use_final_model=cfg.train.use_final_model,
         early_stopping=cfg.train.early_stopping,
     )
-    result = evaluate(
+
+    result_val = evaluate(model, val_loader, cfg.train.K, device)
+    logger.info(
+        "Validation results:\n%s", ", ".join(f"{k}: {v:>8.4f}" for k, v in result_val.items())
+    )
+
+    result_test = evaluate(
         model, test_loader, cfg.train.K, device, Path("results") / f"preds_{run_id}.csv"
     )
-    logger.info("Test results:\n%s", ", ".join(f"{k}: {v:>8.4f}" for k, v in result.items()))
-    return result
+    logger.info(
+        "Test results:\n%s", ", ".join(f"{k}: {v:>8.4f}" for k, v in result_test.items())
+    )
+
+    return result_val, result_test
 
 
 def _fit_propnet(
@@ -137,7 +146,7 @@ if __name__ == "__main__":
                 log_fn=lambda d, step: run.log({**d, "propnet/step": step}),
             )
 
-        result = run_condition(
+        result_val, result_test = run_condition(
             run_id,
             cfg,
             train_ds,
@@ -147,6 +156,7 @@ if __name__ == "__main__":
             propnet,
             log_fn=lambda d, step: run.log({**d, "train/step": step}),
         )
+
         for k in (
             "pehe",
             "rmse_y0",
@@ -156,9 +166,18 @@ if __name__ == "__main__":
             "width_99_y0",
             "width_99_y1",
         ):
-            result[k] *= y_std
-        run.log({f"test/{k}": v for k, v in result.items()})
+            result_val[k] *= y_std
+            result_test[k] *= y_std
+
+        run.log({f"val/{k}": v for k, v in result_val.items()})
+        run.log({f"test/{k}": v for k, v in result_test.items()})
+
+    result = {
+        "config": cfg.model_dump(),
+        "y_std": y_std,
+        "result_val": result_val,
+        "result_test": result_test,
+    }
 
     with open(Path("results") / f"results_{run_id}.json", "w") as f:
-        json.dump(cfg.model_dump() | result, f, indent=2)
-    print(result)
+        json.dump(result, f, indent=2)
