@@ -35,18 +35,40 @@ class _DiffusionBase(nn.Module):
         self, x: torch.Tensor, a: torch.Tensor, K: int = 50
     ) -> tuple[torch.Tensor, torch.Tensor]: ...
 
+    @staticmethod
+    def cosine_beta_schedule(timesteps: int, s=0.008) -> np.ndarray:
+        """Cosine schedule as proposed in Improved Denoising Diffusion Probabilistic Models.
+
+        Nichol & Dariwhal, 2021 (https://arxiv.org/abs/2102.09672)
+        """
+        steps = timesteps + 1
+        tau = np.linspace(0, timesteps, steps)
+        alpha_bar = np.cos(((tau / timesteps) + s) / (1 + s) * np.pi * 0.5) ** 2
+        alpha_bar = alpha_bar / alpha_bar[0]
+        betas = 1 - (alpha_bar[1:] / alpha_bar[:-1])
+        return np.clip(betas, 0.001, 0.999)
+
     def _init_schedule(self, d: DiffusionConfig) -> None:
         L = d.num_steps
         self.L = L
-        betas = (
-            (np.linspace(d.beta_start**0.5, d.beta_end**0.5, L)) ** 2
-            if d.schedule == "quad"
-            else np.linspace(d.beta_start, d.beta_end, L)
-        )
-        alpha = 1.0 - betas
-        alpha_bar = np.cumprod(alpha)
+
+        if d.schedule == "cosine":
+            betas = self.cosine_beta_schedule(L)
+        elif d.beta_start is None or d.beta_end is None:
+            raise ValueError(
+                "beta_start and beta_end must be specified for linear or quad schedule"
+            )
+        elif d.schedule == "quad":
+            betas = np.linspace(d.beta_start**0.5, d.beta_end**0.5, L) ** 2
+        else:
+            # Linear schedule
+            betas = np.linspace(d.beta_start, d.beta_end, L)
+
+        alphas = 1.0 - betas
+        alpha_bar = np.cumprod(alphas)
+
         self.register_buffer("beta_sched", torch.tensor(betas, dtype=torch.float32))
-        self.register_buffer("alpha_sched", torch.tensor(alpha, dtype=torch.float32))
+        self.register_buffer("alpha_sched", torch.tensor(alphas, dtype=torch.float32))
         self.register_buffer("alpha_bar_sched", torch.tensor(alpha_bar, dtype=torch.float32))
 
     def _noise_targets(
@@ -72,19 +94,23 @@ class _DiffusionBase(nn.Module):
     ) -> torch.Tensor:
         """DDPM reverse loop. cond is z (DiffPOCEVAE) or x_rep (DiffPO). Returns (BK,2)."""
         y = torch.randn(BK, 2, device=device)
+
         for step in range(self.L - 1, -1, -1):
             tau = torch.full((BK,), step, device=device, dtype=torch.long)
             eps_pred = self.denoiser(y, tau, cond, a_rep)
+
             alpha_bar = self.alpha_bar_sched[step]
             beta = self.beta_sched[step]
             alpha = self.alpha_sched[step]
             mu = (1.0 / alpha.sqrt()) * (y - (beta / (1.0 - alpha_bar).sqrt()) * eps_pred)
+
             if step > 0:
                 alpha_bar_prev = self.alpha_bar_sched[step - 1]
-                sigma = ((1.0 - alpha_bar_prev) / (1.0 - alpha_bar) * beta).sqrt()
+                sigma = torch.sqrt((1.0 - alpha_bar_prev) / (1.0 - alpha_bar) * beta)
                 y = mu + sigma * torch.randn_like(mu)
             else:
                 y = mu
+
         return y
 
 
