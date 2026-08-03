@@ -7,17 +7,17 @@ model:
 diffusion:
   num_steps: 100        # L diffusion steps
   beta_start: 0.0001
-  beta_end: 0.5         # DiffPO value for tabular PO data
+  beta_end: 0.2
   schedule: quad        # quadratic; DiffPO default for tabular PO data
   embedding_dim: 32     # sinusoidal time embedding dim; matched to block_dim to avoid 4x reduction in diffusion_projection
   block_dim: 32         # I/O width of cond_proj, mapping_noise, and each ResidualBlock; proportionate to latent_dim=20 on IHDP (~985 subjects)
   hidden_dim: 32        # output head width (output_projection1/2, y0/y1 layers); contracts like DiffPO (cond_dim -> hidden_dim)
   num_blocks: 4         # number of residual blocks
-  clip_denoised: False  # whether to clip denoised predictions during reverse diffusion
+  clip_denoised: True  # whether to clip denoised predictions during reverse diffusion
 
 train:
   epochs: 500
-  batch_size: 128
+  batch_size: 256
   lr: 0.0005              # DiffPO paper value
   seed: 42
   K: 50                   # PO samples at inference
