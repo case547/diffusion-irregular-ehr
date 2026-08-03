@@ -44,8 +44,11 @@ def _ds(n=32, f=5):
 
 def test_run_condition_returns_metrics():
     ds = _ds()
-    result = run_condition("test_run", SMALL_CFG, train_ds=ds, val_ds=ds, test_ds=ds)
-    assert set(result.keys()) == {
+    result_val, result_test = run_condition(
+        "test_run", SMALL_CFG, train_ds=ds, val_ds=ds, test_ds=ds
+    )
+
+    expected_keys = {
         "coverage_95_y0",
         "coverage_95_y1",
         "width_95_y0",
@@ -58,6 +61,13 @@ def test_run_condition_returns_metrics():
         "rmse_y1",
         "pehe",
     }
-    for v in result.values():
+
+    assert set(result_val.keys()) == expected_keys
+    assert set(result_test.keys()) == expected_keys
+
+    for v in result_val.values():
+        assert isinstance(v, float)
+        assert np.isfinite(v)
+    for v in result_test.values():
         assert isinstance(v, float)
         assert np.isfinite(v)
