@@ -32,7 +32,7 @@ class _DiffusionBase(nn.Module):
 
     @abstractmethod
     def sample_outcomes(
-        self, x: torch.Tensor, a: torch.Tensor, K: int = 50
+        self, x: torch.Tensor, a: torch.Tensor, K: int = 50, clip_val: float | None = None
     ) -> tuple[torch.Tensor, torch.Tensor]: ...
 
     @staticmethod
@@ -71,6 +71,15 @@ class _DiffusionBase(nn.Module):
         self.register_buffer("alpha_sched", torch.tensor(alphas, dtype=torch.float32))
         self.register_buffer("alpha_bar_sched", torch.tensor(alpha_bar, dtype=torch.float32))
 
+    @staticmethod
+    def _assemble_yboth(
+        a: torch.Tensor, y_fac: torch.Tensor, y_cf: torch.Tensor
+    ) -> torch.Tensor:
+        """Assemble [y0,y1] for each subject, given factual and counterfactual outcomes."""
+        return torch.stack(
+            [y_fac * (1 - a) + y_cf * a, y_fac * a + y_cf * (1 - a)], dim=1
+        )  # (B,2)
+
     def _noise_targets(
         self, x: torch.Tensor, a: torch.Tensor, y_fac: torch.Tensor, y_cf: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -79,18 +88,24 @@ class _DiffusionBase(nn.Module):
         Returns (noisy_y, tau, eps, factual_mask).
         """
         B = x.shape[0]
-        y_both = torch.stack(
-            [y_fac * (1 - a) + y_cf * a, y_fac * a + y_cf * (1 - a)], dim=1
-        )  # (B,2)
+
+        y_both = self._assemble_yboth(a, y_fac, y_cf)  # (B,2)
         factual_mask = torch.stack([1 - a, a], dim=1)  # (B,2)
+
         tau = torch.randint(0, self.L, (B,), device=x.device)
         eps = torch.randn(B, 2, device=x.device)
         ab_tau = self.alpha_bar_sched[tau].unsqueeze(1)  # (B,1)
         noisy_y = ab_tau.sqrt() * y_both + (1.0 - ab_tau).sqrt() * eps
+
         return noisy_y, tau, eps, factual_mask
 
     def _ddpm_reverse(
-        self, BK: int, cond: torch.Tensor, a_rep: torch.Tensor, device: torch.device
+        self,
+        BK: int,
+        cond: torch.Tensor,
+        a_rep: torch.Tensor,
+        device: torch.device,
+        clip_val: float | None = None,
     ) -> torch.Tensor:
         """DDPM reverse loop. cond is z (DiffPOCEVAE) or x_rep (DiffPO). Returns (BK,2)."""
         y = torch.randn(BK, 2, device=device)
@@ -102,14 +117,33 @@ class _DiffusionBase(nn.Module):
             alpha_bar = self.alpha_bar_sched[step]
             beta = self.beta_sched[step]
             alpha = self.alpha_sched[step]
+
             mu = (1.0 / alpha.sqrt()) * (y - (beta / (1.0 - alpha_bar).sqrt()) * eps_pred)
+
+            # If clipping is enabled, we compute a "clean" prediction of y and clip it to the
+            # specified range. This is done to prevent extreme values in the reverse diffusion
+            # process, which can lead to instability or unrealistic predictions (see
+            # diffusion.ipynb). `alpha_bar_safe` is used to avoid division by zero in the case
+            # of very small alpha_bar values.
+            if clip_val is not None:
+                alpha_bar_safe = alpha_bar.clamp(min=1e-15)
+                clean_pred: torch.Tensor = (
+                    y - (1.0 - alpha_bar).sqrt() * eps_pred
+                ) / alpha_bar_safe.sqrt()
+                clean_pred = clean_pred.clamp(-clip_val, clip_val)
 
             if step > 0:
                 alpha_bar_prev = self.alpha_bar_sched[step - 1]
                 sigma = torch.sqrt((1.0 - alpha_bar_prev) / (1.0 - alpha_bar) * beta)
+
+                if clip_val is not None:
+                    mu = (alpha_bar_prev.sqrt() * beta / (1.0 - alpha_bar)) * clean_pred + (
+                        (1.0 - alpha_bar_prev) * alpha.sqrt() / (1.0 - alpha_bar)
+                    ) * y
+
                 y = mu + sigma * torch.randn_like(mu)
             else:
-                y = mu
+                y = mu if clip_val is None else clean_pred
 
         return y
 
@@ -187,7 +221,7 @@ class DiffPOCEVAE(_DiffusionBase):
 
     @torch.no_grad()
     def sample_outcomes(
-        self, x: torch.Tensor, a: torch.Tensor, K: int = 50
+        self, x: torch.Tensor, a: torch.Tensor, K: int = 50, clip_val: float | None = None
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Generate K PO samples per subject. Returns y0 (B,K), y1 (B,K)."""
         B, device = x.shape[0], x.device
@@ -196,7 +230,7 @@ class DiffPOCEVAE(_DiffusionBase):
         a_rep = a.repeat_interleave(K, dim=0)
         y_hat = self.aux_outcome.sample(x_rep, a_rep)
         z, _, _ = self.encoder.rsample(x_rep, a_rep, y_hat)
-        y = self._ddpm_reverse(BK, z, a_rep, device).reshape(B, K, 2)
+        y = self._ddpm_reverse(BK, z, a_rep, device, clip_val).reshape(B, K, 2)
         return y[:, :, 0], y[:, :, 1]
 
 
@@ -253,12 +287,12 @@ class DiffPO(_DiffusionBase):
 
     @torch.no_grad()
     def sample_outcomes(
-        self, x: torch.Tensor, a: torch.Tensor, K: int = 50
+        self, x: torch.Tensor, a: torch.Tensor, K: int = 50, clip_val: float | None = None
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Generate K PO samples per subject. Returns y0 (B,K), y1 (B,K)."""
         B, device = x.shape[0], x.device
         BK = B * K
         x_rep = x.repeat_interleave(K, dim=0)
         a_rep = a.repeat_interleave(K, dim=0)
-        y = self._ddpm_reverse(BK, x_rep, a_rep, device).reshape(B, K, 2)
+        y = self._ddpm_reverse(BK, x_rep, a_rep, device, clip_val).reshape(B, K, 2)
         return y[:, :, 0], y[:, :, 1]

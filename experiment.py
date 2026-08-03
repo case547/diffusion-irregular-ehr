@@ -56,13 +56,26 @@ def run_condition(
         early_stopping=cfg.train.early_stopping,
     )
 
-    result_val = evaluate(model, val_loader, cfg.train.K, device)
+    if train_ds.y_cf is not None:
+        y_both = _DiffusionBase._assemble_yboth(train_ds.a, train_ds.y, train_ds.y_cf)
+        y_abs_max = y_both.abs().max().item()
+    else:
+        y_abs_max = train_ds.y.abs().max().item()
+
+    clip_value = 2 * y_abs_max if cfg.diffusion.clip_denoised else None
+
+    result_val = evaluate(model, val_loader, cfg.train.K, device, clip_val=clip_value)
     logger.info(
         "Validation results:\n%s", ", ".join(f"{k}: {v:>8.4f}" for k, v in result_val.items())
     )
 
     result_test = evaluate(
-        model, test_loader, cfg.train.K, device, Path("results") / f"preds_{run_id}.csv"
+        model,
+        test_loader,
+        cfg.train.K,
+        device,
+        Path("results") / f"preds_{run_id}.csv",
+        clip_val=clip_value,
     )
     logger.info(
         "Test results:\n%s", ", ".join(f"{k}: {v:>8.4f}" for k, v in result_test.items())
