@@ -51,6 +51,7 @@ def evaluate(
     K: int,
     device: torch.device,
     preds_csv_path: Path | None = None,
+    clip_val: float | None = None,
 ) -> dict[str, float]:
     """Test-time evaluation: generate K PO samples and compute coverage, RMSE, PEHE.
 
@@ -63,7 +64,7 @@ def evaluate(
         for batch in loader:
             x = batch["x"].to(device)
             a = batch["a"].to(device)
-            y0_s, y1_s = model.sample_outcomes(x, a, K=K)  # each (B,K)
+            y0_s, y1_s = model.sample_outcomes(x, a, K=K, clip_val=clip_val)  # each (B,K)
             all_y0.append(y0_s.cpu())
             all_y1.append(y1_s.cpu())
             all_mu0.append(batch["mu0"])
