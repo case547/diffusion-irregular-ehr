@@ -99,5 +99,5 @@ for num_steps, beta_end, ckpt_path in RUNS:
         f"{result_val['coverage_95_y1']:>9.4f}"
     )
 
-with open(Path("results") / "results_clipping.json", "w") as f:
+with open(Path("results") / "results_naive_full_clipping_investigation.json", "w") as f:
     json.dump(results, f, indent=2)
