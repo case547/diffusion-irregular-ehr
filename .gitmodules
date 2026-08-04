@@ -1,3 +1,6 @@
 [submodule "DiffPO"]
 	path = DiffPO
 	url = https://github.com/case547/DiffPO/
+[submodule "denoising-diffusion-pytorch"]
+	path = denoising-diffusion-pytorch
+	url = https://github.com/lucidrains/denoising-diffusion-pytorch
