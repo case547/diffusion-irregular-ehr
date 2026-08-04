@@ -127,6 +127,8 @@ rng = np.random.default_rng(SEED)
 out_dir = HERE / "full"
 out_dir.mkdir(exist_ok=True)
 
+beta_records = []
+
 for rep in range(1, NUM_REPLICATIONS + 1):
     npci = pd.read_csv(
         HERE / "npci" / f"ihdp_npci_{rep}.csv",
@@ -156,9 +158,9 @@ for rep in range(1, NUM_REPLICATIONS + 1):
             f"rep {rep} {name}: coef off grid, max_err={max_err:.2e}"
         )
 
-    snapped = BETA_GRID[np.abs(reg1.coef_[:, None] - BETA_GRID).argmin(axis=1)]
-    reg0.coef_ = snapped.copy()
-    reg1.coef_ = snapped.copy()
+    coefs_snapped = BETA_GRID[np.abs(reg1.coef_[:, None] - BETA_GRID).argmin(axis=1)]
+    reg0.coef_ = coefs_snapped.copy()
+    reg1.coef_ = coefs_snapped.copy()
 
     # Noise sigma is a fixed DGP constant (sigy=1 in sim.code.overlap.R), not
     # something to estimate -- the ~0.98-0.99 empirical std over 747 subjects
@@ -179,7 +181,7 @@ for rep in range(1, NUM_REPLICATIONS + 1):
     mu1_all[npci_idx] = mu1_npci
 
     # -- Build output dataframe (985 rows, same order as imp1) ----------------
-    treament_all = imp1["treat"].values.astype(float)
+    treatment_all = imp1["treat"].values.astype(float)
 
     # The offset baked into mu1 was calibrated so CATT=4 over the *original*
     # 139 treated subjects only. Response surface B has a heterogeneous
@@ -187,12 +189,32 @@ for rep in range(1, NUM_REPLICATIONS + 1):
     # treated subjects with a different covariate distribution shifts the
     # realized CATT away from exactly 4 -- report the actual values.
     te_all = mu1_all - mu0_all
-    catt_full = te_all[treament_all == 1].mean()
-    catc_full = te_all[treament_all == 0].mean()
+    catt_full = te_all[treatment_all == 1].mean()
+    catc_full = te_all[treatment_all == 0].mean()
     ate_full = te_all.mean()
 
+    # reg0/reg1 intercepts differ by exactly the CATT-calibration offset omega
+    # (see comment above: log(mu0) and mu1 share betaB's slope vector, differing
+    # only in intercept) -- reg1.intercept_ = reg0.intercept_ - omega.
+    beta_records.append(
+        {
+            "replication": rep,
+            "treatment_rate": treatment_all.mean(),
+            "mu0_min": mu0_all.min(),
+            "mu0_max": mu0_all.max(),
+            "mu1_min": mu1_all.min(),
+            "mu1_max": mu1_all.max(),
+            **dict(zip(COVARIATE_COLS, coefs_snapped, strict=True)),
+            "intercept": reg0.intercept_,
+            "catt_calibration_offset": reg0.intercept_ - reg1.intercept_,
+            "CATT": catt_full,
+            "CATC": catc_full,
+            "ATE": ate_full,
+        }
+    )
+
     out = pd.DataFrame()
-    out["treat"] = treament_all
+    out["treat"] = treatment_all
     out["mu0"] = mu0_all
     out["mu1"] = mu1_all
 
@@ -208,7 +230,7 @@ for rep in range(1, NUM_REPLICATIONS + 1):
     mu1_new = mu1_all[new_idx]
     y0_new = mu0_new + rng.normal(0, sigma, size=len(new_idx))
     y1_new = mu1_new + rng.normal(0, sigma, size=len(new_idx))
-    treatment_new = treament_all[new_idx]  # all 1 (treated)
+    treatment_new = treatment_all[new_idx]  # all 1 (treated)
     y_fac_all[new_idx] = (1 - treatment_new) * y0_new + treatment_new * y1_new
     y_cfac_all[new_idx] = treatment_new * y0_new + (1 - treatment_new) * y1_new
 
@@ -235,7 +257,7 @@ for rep in range(1, NUM_REPLICATIONS + 1):
     path = out_dir / f"ihdp_full_{rep}.csv"
     out.to_csv(path, index=False)
     print(
-        f"Rep {rep:2d}: N={len(out)}  treat_rate={treament_all.mean():.3f}"
+        f"Rep {rep:2d}: N={len(out)}  treat_rate={treatment_all.mean():.3f}"
         f"  mu0=[{mu0_all.min():.2f},{mu0_all.max():.2f}]"
         f"  mu1=[{mu1_all.min():.2f},{mu1_all.max():.2f}]"
         f"  sigma={sigma:.4f}"
@@ -243,3 +265,7 @@ for rep in range(1, NUM_REPLICATIONS + 1):
     )
 
 print(f"\nSaved {NUM_REPLICATIONS} replications to {out_dir}/")
+
+beta_path = out_dir / "beta_coefficients.csv"
+pd.DataFrame(beta_records).to_csv(beta_path, index=False)
+print(f"Saved beta coefficients to {beta_path}")
