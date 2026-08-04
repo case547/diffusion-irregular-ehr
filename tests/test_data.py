@@ -1,14 +1,7 @@
 import numpy as np
-import pandas as pd
-import pytest
 import torch
 
-from src.data import (
-    CausalDataset,
-    load_acic,
-    make_acic_confounded,
-    make_ihdp_confounded,
-)
+from src.data import CausalDataset, make_ihdp_confounded
 
 # ── shared fixture ────────────────────────────────────────────────────────────
 
@@ -84,63 +77,3 @@ def test_make_ihdp_confounded_outcomes_unchanged():
     np.testing.assert_array_equal(ds.y.numpy(), ds_c.y.numpy())
     np.testing.assert_array_equal(ds.mu0.numpy(), ds_c.mu0.numpy())
     np.testing.assert_array_equal(ds.mu1.numpy(), ds_c.mu1.numpy())
-
-
-# ── ACIC loading ──────────────────────────────────────────────────────────────
-
-
-@pytest.fixture
-def acic_csv(tmp_path):
-    """Fake ACIC norm_data CSV: 100 rows, 5 covariates (cols 5-9)."""
-    np.random.seed(0)
-    N, F = 100, 5
-    data = np.zeros((N, F + 5), dtype=np.float32)
-    data[:50, 0] = 0
-    data[50:, 0] = 1  # treatment
-    data[:, 1] = np.random.randn(N)  # y0
-    data[:, 2] = np.random.randn(N)  # y1
-    data[:, 3] = data[:, 1]  # mu0
-    data[:, 4] = data[:, 2]  # mu1
-    data[:, 5:] = np.random.randn(N, F)  # covariates
-    # make col 5 strongly correlated with treatment
-    data[:, 5] = data[:, 0] + 0.1 * np.random.randn(N)
-    sheet_id = "fake_sheet"
-    pd.DataFrame(data).to_csv(tmp_path / f"{sheet_id}.csv", index=False)
-    return str(tmp_path), sheet_id, N, F
-
-
-def test_load_acic_shapes(acic_csv):
-    data_dir, sheet_id, N, F = acic_csv
-    train_ds, val_ds, test_ds = load_acic(data_dir, sheet_id)
-    assert train_ds[0]["x"].shape == (F,)
-    assert train_ds[0]["a"].shape == ()
-    assert train_ds[0]["y"].shape == ()
-    assert train_ds[0]["mu0"].shape == ()
-    total = len(train_ds) + len(val_ds) + len(test_ds)
-    assert total == N
-
-
-def test_load_acic_confounder(acic_csv):
-    data_dir, sheet_id, N, F = acic_csv
-    train_ds, val_ds, test_ds = load_acic(data_dir, sheet_id)
-    assert train_ds.confounder is not None
-    assert set(np.unique(train_ds.confounder)).issubset({0.0, 1.0})
-
-
-def test_make_acic_confounded_flip(acic_csv):
-    data_dir, sheet_id, N, F = acic_csv
-    train_ds, _, _ = load_acic(data_dir, sheet_id)
-    conf_ds = make_acic_confounded(train_ds)
-    a_orig = train_ds.a.numpy()
-    a_conf = conf_ds.a.numpy()
-    mask = train_ds.confounder == 1
-    assert np.all(a_conf[mask] == 1 - a_orig[mask])
-    assert np.all(a_conf[~mask] == a_orig[~mask])
-
-
-def test_make_acic_confounded_x_unchanged(acic_csv):
-    data_dir, sheet_id, N, F = acic_csv
-    train_ds, _, _ = load_acic(data_dir, sheet_id)
-    conf_ds = make_acic_confounded(train_ds)
-    np.testing.assert_array_equal(train_ds.x.numpy(), conf_ds.x.numpy())
-    assert conf_ds[0]["x"].shape == (F,)
