@@ -55,25 +55,39 @@ def test_confounder_not_in_getitem():
 def test_make_ihdp_confounded_shapes():
     x, a, y, y_cf, mu0, mu1, conf = _fake(100)
     ds = CausalDataset(x, a, y, y_cf, mu0, mu1, conf)
-    ds_c = make_ihdp_confounded(ds)
-    assert ds_c[0]["x"].shape == (25,)  # x unchanged
+    ds_conf = make_ihdp_confounded(ds)
+    assert ds_conf[0]["x"].shape == (25,)  # x unchanged
 
 
 def test_make_ihdp_confounded_flip():
     x, a, y, y_cf, mu0, mu1, conf = _fake(100)
     ds = CausalDataset(x, a, y, y_cf, mu0, mu1, conf)
-    ds_c = make_ihdp_confounded(ds)
+    ds_conf = make_ihdp_confounded(ds)
     a_orig = ds.a.numpy()
-    a_conf = ds_c.a.numpy()
+    a_conf = ds_conf.a.numpy()
     mask = conf == 1
     assert np.all(a_conf[mask] == 1 - a_orig[mask])
     assert np.all(a_conf[~mask] == a_orig[~mask])
 
 
-def test_make_ihdp_confounded_outcomes_unchanged():
+def test_make_ihdp_confounded_outcomes_swapped_for_flipped():
     x, a, y, y_cf, mu0, mu1, conf = _fake(100)
     ds = CausalDataset(x, a, y, y_cf, mu0, mu1, conf)
-    ds_c = make_ihdp_confounded(ds)
-    np.testing.assert_array_equal(ds.y.numpy(), ds_c.y.numpy())
-    np.testing.assert_array_equal(ds.mu0.numpy(), ds_c.mu0.numpy())
-    np.testing.assert_array_equal(ds.mu1.numpy(), ds_c.mu1.numpy())
+    ds_conf = make_ihdp_confounded(ds)
+    mask = conf == 1
+
+    y_orig, y_cf_orig = ds.y.numpy(), ds.y_cf.numpy()
+    y_conf, y_cf_conf = ds_conf.y.numpy(), ds_conf.y_cf.numpy()
+
+    # Flipped subjects: y/y_cf swapped, since flipping `a` changes which PO is factual.
+    np.testing.assert_array_equal(y_conf[mask], y_cf_orig[mask])
+    np.testing.assert_array_equal(y_cf_conf[mask], y_orig[mask])
+
+    # Unflipped subjects: y/y_cf unchanged.
+    np.testing.assert_array_equal(y_conf[~mask], y_orig[~mask])
+    np.testing.assert_array_equal(y_cf_conf[~mask], y_cf_orig[~mask])
+
+    # mu0/mu1 identify potential outcomes by treatment arm, not factual status --
+    # unaffected by which treatment ended up assigned.
+    np.testing.assert_array_equal(ds.mu0.numpy(), ds_conf.mu0.numpy())
+    np.testing.assert_array_equal(ds.mu1.numpy(), ds_conf.mu1.numpy())
