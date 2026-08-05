@@ -118,24 +118,61 @@ def load_ihdp(
     return _make(idx_train), _make(idx_val), _make(idx_test), float(y_std)
 
 
-def make_ihdp_confounded(ds: CausalDataset) -> CausalDataset:
-    """Flip treatment where ds.confounder == 1 (momblack). x unchanged.
+def make_ihdp_confounded(ds: CausalDataset, effect: float = 0.0) -> CausalDataset:
+    """Confound on ds.confounder == 1 (momblack). x unchanged.
 
-    momblack is not in x1-x25, but is partially recoverable via proxy variables.
-    Flipping treatment changes which potential outcome is factual vs counterfactual,
-    so y/y_cf are swapped for flipped subjects to stay consistent with the new a.
-    mu0/mu1 (identified by treatment arm, not factual status) are unaffected.
+    Two independent mechanisms, applied in sequence:
+
+    1. Direct outcome effect (skipped entirely if effect == 0): momblack shifts the
+       true potential outcomes by the same rule Hill's response surface B uses for
+       every other covariate -- multiplicative for mu0 (which lives in log-space,
+       mu0 = exp(beta.X)), additive for mu1 (mu1 = beta.X). This asymmetry matters:
+       a *shared* level shift (mu0 += c, mu1 += c) would cancel exactly out of
+       mu1-mu0, leaving PEHE unbiased (only rmse_y0/rmse_y1 would move) -- using
+       Hill's own asymmetric structure instead avoids that trap for free.
+
+       Each subject's original noise realisation (y0-mu0, y1-mu1) is preserved and
+       re-applied to the shifted means, rather than resampling fresh noise, so the
+       only thing that changes is the systematic shift, not also unrelated
+       randomness.
+
+    2. Selection effect: treatment is flipped for confounder==1 subjects (momblack
+       is not in x1-x25, but is partially recoverable via proxy variables).
+
+       Flipping treatment changes which potential outcome is factual vs
+       counterfactual, so y/y_cf are swapped for flipped subjects to stay
+       consistent with the new a. mu0/mu1 (identified by treatment arm, not
+       factual status) are unaffected by this step.
     """
     assert ds.confounder is not None, "ds.confounder is None; load via load_ihdp"
-    flip = ds.confounder == 1
-    a = ds.a.numpy().copy()
-    a[flip] = 1.0 - a[flip]
-
+    conf = ds.confounder
+    a_orig = ds.a.numpy()
     y = ds.y.numpy()
     y_cf = ds.y_cf.numpy() if ds.y_cf is not None else None
+    mu0 = ds.mu0.numpy() if ds.mu0 is not None else None
+    mu1 = ds.mu1.numpy() if ds.mu1 is not None else None
+
+    if effect != 0.0:
+        assert mu0 is not None and mu1 is not None and y_cf is not None, (
+            "effect != 0 requires mu0, mu1, and y_cf; load via load_ihdp"
+        )
+        y0_old = np.where(a_orig == 0, y, y_cf)
+        y1_old = np.where(a_orig == 0, y_cf, y)
+        noise0 = y0_old - mu0
+        noise1 = y1_old - mu1
+
+        mu0 = mu0 * np.exp(effect * conf)
+        mu1 = mu1 + effect * conf
+
+        y0_new = mu0 + noise0
+        y1_new = mu1 + noise1
+        y = np.where(a_orig == 0, y0_new, y1_new)
+        y_cf = np.where(a_orig == 0, y1_new, y0_new)
+
+    flip = conf == 1
+    a = a_orig.copy()
+    a[flip] = 1.0 - a[flip]
     if y_cf is not None:
         y, y_cf = np.where(flip, y_cf, y), np.where(flip, y, y_cf)
 
-    mu0 = ds.mu0.numpy() if ds.mu0 is not None else None
-    mu1 = ds.mu1.numpy() if ds.mu1 is not None else None
-    return CausalDataset(ds.x.numpy(), a, y, y_cf, mu0, mu1, ds.confounder.copy())
+    return CausalDataset(ds.x.numpy(), a, y, y_cf, mu0, mu1, conf.copy())

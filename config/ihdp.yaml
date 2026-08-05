@@ -32,3 +32,4 @@ data:
   replication: 1        # which IHDP NPCI replication to use (1-indexed, 1-10 available)
   train_ratio: 0.7      # 70% train
   test_ratio: 0.15      # 15% test; val inferred as remaining (1 - train_ratio - test_ratio = 0.15)
+  confounder_effect: 0.4  # momblack's direct outcome effect; largest value in Hill's own beta grid

@@ -139,7 +139,8 @@ if __name__ == "__main__":
     model_cls, use_conf = CONDITION_MAP[args.condition]
     if use_conf:
         train_ds, val_ds, test_ds = (
-            make_ihdp_confounded(ds) for ds in (train_ds, val_ds, test_ds)
+            make_ihdp_confounded(ds, effect=cfg.data.confounder_effect)
+            for ds in (train_ds, val_ds, test_ds)
         )
 
     with wandb.init(

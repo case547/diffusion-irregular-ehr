@@ -38,6 +38,7 @@ class DataConfig(BaseModel):
     replication: int
     train_ratio: float
     test_ratio: float
+    confounder_effect: float = 0.0
 
 
 class Config(BaseModel):
