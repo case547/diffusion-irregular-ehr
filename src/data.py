@@ -12,7 +12,16 @@ class CausalDataset(Dataset):
     y_cf: noisy counterfactual outcome -- passed to denoiser input (not used in loss).
     """
 
-    def __init__(self, x, a, y, y_cf=None, mu0=None, mu1=None, confounder=None):
+    def __init__(
+        self,
+        x: np.ndarray,
+        a: np.ndarray,
+        y: np.ndarray,
+        y_cf: np.ndarray | None = None,
+        mu0: np.ndarray | None = None,
+        mu1: np.ndarray | None = None,
+        confounder: np.ndarray | None = None,
+    ):
         self.x = torch.tensor(x, dtype=torch.float32)
         self.a = torch.tensor(a, dtype=torch.float32)
         self.y = torch.tensor(y, dtype=torch.float32)
@@ -21,10 +30,10 @@ class CausalDataset(Dataset):
         self.mu1 = torch.tensor(mu1, dtype=torch.float32) if mu1 is not None else None
         self.confounder = confounder
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.x)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
         item = {"x": self.x[idx], "a": self.a[idx], "y": self.y[idx]}
         if self.y_cf is not None:
             item["y_cf"] = self.y_cf[idx]
@@ -113,12 +122,20 @@ def make_ihdp_confounded(ds: CausalDataset) -> CausalDataset:
     """Flip treatment where ds.confounder == 1 (momblack). x unchanged.
 
     momblack is not in x1-x25, but is partially recoverable via proxy variables.
-    Outcomes and ground-truth POs unchanged.
+    Flipping treatment changes which potential outcome is factual vs counterfactual,
+    so y/y_cf are swapped for flipped subjects to stay consistent with the new a.
+    mu0/mu1 (identified by treatment arm, not factual status) are unaffected.
     """
     assert ds.confounder is not None, "ds.confounder is None; load via load_ihdp"
+    flip = ds.confounder == 1
     a = ds.a.numpy().copy()
-    a[ds.confounder == 1] = 1.0 - a[ds.confounder == 1]
+    a[flip] = 1.0 - a[flip]
+
+    y = ds.y.numpy()
     y_cf = ds.y_cf.numpy() if ds.y_cf is not None else None
+    if y_cf is not None:
+        y, y_cf = np.where(flip, y_cf, y), np.where(flip, y, y_cf)
+
     mu0 = ds.mu0.numpy() if ds.mu0 is not None else None
     mu1 = ds.mu1.numpy() if ds.mu1 is not None else None
-    return CausalDataset(ds.x.numpy(), a, ds.y.numpy(), y_cf, mu0, mu1, ds.confounder.copy())
+    return CausalDataset(ds.x.numpy(), a, y, y_cf, mu0, mu1, ds.confounder.copy())
