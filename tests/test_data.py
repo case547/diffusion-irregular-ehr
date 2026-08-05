@@ -91,3 +91,38 @@ def test_make_ihdp_confounded_outcomes_swapped_for_flipped():
     # unaffected by which treatment ended up assigned.
     np.testing.assert_array_equal(ds.mu0.numpy(), ds_conf.mu0.numpy())
     np.testing.assert_array_equal(ds.mu1.numpy(), ds_conf.mu1.numpy())
+
+
+def test_make_ihdp_confounded_outcome_effect():
+    x, a, y, y_cf, mu0, mu1, conf = _fake(100)
+    ds = CausalDataset(x, a, y, y_cf, mu0, mu1, conf)
+    effect = 0.4
+    ds_conf = make_ihdp_confounded(ds, effect=effect)
+    mask = conf == 1
+
+    mu0_orig, mu1_orig = ds.mu0.numpy(), ds.mu1.numpy()
+    mu0_new, mu1_new = ds_conf.mu0.numpy(), ds_conf.mu1.numpy()
+
+    # Direct outcome effect: multiplicative for mu0, additive for mu1, only for
+    # confounder==1 subjects (mu0/mu1 are never touched by the flip step).
+    np.testing.assert_allclose(mu0_new[mask], mu0_orig[mask] * np.exp(effect), rtol=1e-6)
+    np.testing.assert_allclose(mu1_new[mask], mu1_orig[mask] + effect, rtol=1e-6)
+    np.testing.assert_array_equal(mu0_new[~mask], mu0_orig[~mask])
+    np.testing.assert_array_equal(mu1_new[~mask], mu1_orig[~mask])
+
+    # Noise is preserved, not resampled: reconstruct each subject's original and
+    # new noise (accounting for the swap on flipped subjects) and check they match.
+    a_orig = ds.a.numpy()
+    y0_old = np.where(a_orig == 0, ds.y.numpy(), ds.y_cf.numpy())
+    y1_old = np.where(a_orig == 0, ds.y_cf.numpy(), ds.y.numpy())
+    noise0_old = y0_old - mu0_orig
+    noise1_old = y1_old - mu1_orig
+
+    a_new = ds_conf.a.numpy()
+    y0_new = np.where(a_new == 0, ds_conf.y.numpy(), ds_conf.y_cf.numpy())
+    y1_new = np.where(a_new == 0, ds_conf.y_cf.numpy(), ds_conf.y.numpy())
+    noise0_new = y0_new - mu0_new
+    noise1_new = y1_new - mu1_new
+
+    np.testing.assert_allclose(noise0_new, noise0_old, rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(noise1_new, noise1_old, rtol=1e-5, atol=1e-5)
