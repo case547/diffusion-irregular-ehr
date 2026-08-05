@@ -45,20 +45,18 @@ from sklearn.linear_model import LinearRegression
 
 # -- Column definitions --------------------------------------------------------
 
+CONTINOUS_VARS = ["bw", "b.head", "preterm", "birth.o", "nnhealth", "momage"]
 # fmt: off
-NPCI_COLS = [
-    "treat",
-    "y_factual","y_cfactual", "mu0", "mu1",
-    # Continuous variables
-    "bw", "b.head", "preterm", "birth.o", "nnhealth", "momage",
-    # Binary variables
+BINARY_VARS = [
     "sex", "twin", "b.marr", "mom.lths", "mom.hs", "mom.scoll",
     "cig", "first", "booze", "drugs", "work.dur", "prenatal",
-    # Site indicators
-    "ark", "ein", "har", "mia", "pen", "tex", "was",
 ]
 # fmt: on
-COVARIATE_COLS = NPCI_COLS[5:]  # 25 covariate names
+SITE_INDICATORS = ["ark", "ein", "har", "mia", "pen", "tex", "was"]
+
+COVARIATE_COLS = [*CONTINOUS_VARS, *BINARY_VARS, *SITE_INDICATORS]  # 25 covariates
+NPCI_COLS = ["treat", "y_factual", "y_cfactual", "mu0", "mu1", *COVARIATE_COLS]
+
 NUM_REPLICATIONS = 10
 SEED = 42
 
@@ -108,9 +106,15 @@ slopes = np.array(
 )
 intercepts = npci_ref_x.mean(axis=0) - slopes * raw_ref_x.mean(axis=0)
 
+# The fitted slope/intercept recovers binary data near-exactly (~1e-15 off)
+# Snap these columns to the nearest integer to remove that floating-point noise
+INTEGER_COL_IDX = [COVARIATE_COLS.index(c) for c in [*BINARY_VARS, *SITE_INDICATORS]]
+
 
 def to_npci_scale(raw_x: np.ndarray) -> np.ndarray:
-    return raw_x * slopes + intercepts
+    scaled = raw_x * slopes + intercepts
+    scaled[:, INTEGER_COL_IDX] = np.round(scaled[:, INTEGER_COL_IDX])
+    return scaled
 
 
 X_npci = to_npci_scale(imp1_npci[COVARIATE_COLS].values.astype(float))  # 747 × 25
