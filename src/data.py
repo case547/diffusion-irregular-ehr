@@ -10,6 +10,9 @@ class CausalDataset(Dataset):
 
     confounder: optional binary numpy array -- not a model input, not in __getitem__.
     y_cf: noisy counterfactual outcome -- passed to denoiser input (not used in loss).
+    y_mean/y_std: training-split outcome normalisation stats (set by load_ihdp), used
+        by make_ihdp_confounded to apply Hill's response-surface mechanism in raw-
+        outcome units. Not model inputs, not in __getitem__.
     """
 
     def __init__(
@@ -21,6 +24,8 @@ class CausalDataset(Dataset):
         mu0: np.ndarray | None = None,
         mu1: np.ndarray | None = None,
         confounder: np.ndarray | None = None,
+        y_mean: float | None = None,
+        y_std: float | None = None,
     ):
         self.x = torch.tensor(x, dtype=torch.float32)
         self.a = torch.tensor(a, dtype=torch.float32)
@@ -29,6 +34,8 @@ class CausalDataset(Dataset):
         self.mu0 = torch.tensor(mu0, dtype=torch.float32) if mu0 is not None else None
         self.mu1 = torch.tensor(mu1, dtype=torch.float32) if mu1 is not None else None
         self.confounder = confounder
+        self.y_mean = y_mean
+        self.y_std = y_std
 
     def __len__(self) -> int:
         return len(self.x)
@@ -113,6 +120,8 @@ def load_ihdp(
             mu0[idx_],
             mu1[idx_],
             confounder[idx_],
+            float(y_mean),
+            float(y_std),
         )
 
     return _make(idx_train), _make(idx_val), _make(idx_test), float(y_std)
@@ -131,10 +140,19 @@ def make_ihdp_confounded(ds: CausalDataset, effect: float = 0.0) -> CausalDatase
        mu1-mu0, leaving PEHE unbiased (only rmse_y0/rmse_y1 would move) -- using
        Hill's own asymmetric structure instead avoids that trap for free.
 
-       Each subject's original noise realisation (y0-mu0, y1-mu1) is preserved and
-       re-applied to the shifted means, rather than resampling fresh noise, so the
-       only thing that changes is the systematic shift, not also unrelated
-       randomness.
+       ds.y_mean/ds.y_std (set by load_ihdp) are required whenever effect != 0.
+       load_ihdp normalises mu0/mu1/y/y_cf to the training split's scale, but Hill's
+       mechanism is defined in raw-outcome units (the {0,0.1,0.2,0.3,0.4} coefficient
+       grid). Applying it directly to normalised mu0 is wrong: normalised mu0 is
+       negative for ~90% of subjects (control outcomes sit below the pooled mean), so
+       multiplying by exp(effect) > 1 makes it *more* negative -- decreasing raw mu0
+       for most subjects, the opposite of Hill's mechanism. Fixed by de-normalising
+       to raw units, applying the shift there, then re-normalising back.
+
+       Each subject's original noise realisation (y0-mu0, y1-mu1), computed in raw
+       units, is preserved and re-applied to the shifted means, rather than
+       resampling fresh noise, so the only thing that changes is the systematic
+       shift, not also unrelated randomness.
 
     2. Selection effect: treatment is flipped for confounder==1 subjects (momblack
        is not in x1-x25, but is partially recoverable via proxy variables).
@@ -156,16 +174,34 @@ def make_ihdp_confounded(ds: CausalDataset, effect: float = 0.0) -> CausalDatase
         assert mu0 is not None and mu1 is not None and y_cf is not None, (
             "effect != 0 requires mu0, mu1, and y_cf; load via load_ihdp"
         )
-        y0_old = np.where(a_orig == 0, y, y_cf)
-        y1_old = np.where(a_orig == 0, y_cf, y)
-        noise0 = y0_old - mu0
-        noise1 = y1_old - mu1
+        assert ds.y_mean is not None and ds.y_std is not None, (
+            "effect != 0 requires ds.y_mean/ds.y_std (set by load_ihdp) to apply "
+            "Hill's mechanism in raw-outcome units, not the normalised training scale"
+        )
+        y_mean, y_std = ds.y_mean, ds.y_std
 
-        mu0 = mu0 * np.exp(effect * conf)
-        mu1 = mu1 + effect * conf
+        def denorm(v: np.ndarray) -> np.ndarray:
+            return v * y_std + y_mean
 
-        y0_new = mu0 + noise0
-        y1_new = mu1 + noise1
+        def renorm(v: np.ndarray) -> np.ndarray:
+            return (v - y_mean) / y_std
+
+        y0_raw = denorm(np.where(a_orig == 0, y, y_cf))
+        y1_raw = denorm(np.where(a_orig == 0, y_cf, y))
+        mu0_raw = denorm(mu0)
+        mu1_raw = denorm(mu1)
+        noise0 = y0_raw - mu0_raw
+        noise1 = y1_raw - mu1_raw
+
+        mu0_raw_new = mu0_raw * np.exp(effect * conf)
+        mu1_raw_new = mu1_raw + effect * conf
+        y0_raw_new = mu0_raw_new + noise0
+        y1_raw_new = mu1_raw_new + noise1
+
+        mu0 = renorm(mu0_raw_new)
+        mu1 = renorm(mu1_raw_new)
+        y0_new = renorm(y0_raw_new)
+        y1_new = renorm(y1_raw_new)
         y = np.where(a_orig == 0, y0_new, y1_new)
         y_cf = np.where(a_orig == 0, y1_new, y0_new)
 
@@ -175,4 +211,4 @@ def make_ihdp_confounded(ds: CausalDataset, effect: float = 0.0) -> CausalDatase
     if y_cf is not None:
         y, y_cf = np.where(flip, y_cf, y), np.where(flip, y, y_cf)
 
-    return CausalDataset(ds.x.numpy(), a, y, y_cf, mu0, mu1, conf.copy())
+    return CausalDataset(ds.x.numpy(), a, y, y_cf, mu0, mu1, conf.copy(), ds.y_mean, ds.y_std)
