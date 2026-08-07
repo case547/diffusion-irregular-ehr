@@ -6,7 +6,6 @@ from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
-import numpy as np
 import torch
 import wandb
 import yaml
@@ -32,8 +31,6 @@ def run_condition(
     log_fn: Callable | None = None,
 ) -> tuple[dict[str, float], dict[str, float]]:
     """Train one model on one dataset condition and return test metrics."""
-    torch.manual_seed(cfg.train.seed)
-    np.random.seed(cfg.train.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     train_loader = DataLoader(train_ds, batch_size=cfg.train.batch_size, shuffle=True)
@@ -141,6 +138,11 @@ if __name__ == "__main__":
         rep_cfg = cfg.model_copy(
             update={"data": cfg.data.model_copy(update={"replication": rep})}
         )
+
+        # Seed before any randomness for this replication -- including PropensityNet's
+        # own weight init and shuffling in _fit_propnet below, which otherwise runs on
+        # an unseeded RNG stream and makes naive_full/naive_conf non-reproducible.
+        torch.manual_seed(rep_cfg.train.seed)
 
         train_ds, val_ds, test_ds, y_std = load_ihdp(
             rep_cfg.data.path,
