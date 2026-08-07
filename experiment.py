@@ -116,9 +116,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     run_time_str = datetime.now().isoformat(timespec="seconds").replace(":", "_")
-    run_id = f"{args.condition}_{run_time_str}"
 
-    log_path = Path("logs") / f"{run_id}.log"
+    log_path = Path("logs") / f"{args.condition}_{run_time_str}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
         level=logging.INFO,
@@ -129,69 +128,75 @@ if __name__ == "__main__":
     with open(args.config) as f:
         cfg = Config.model_validate(yaml.safe_load(f))
 
-    train_ds, val_ds, test_ds, y_std = load_ihdp(
-        cfg.data.path,
-        replication=cfg.data.replication,
-        train_ratio=cfg.data.train_ratio,
-        test_ratio=cfg.data.test_ratio,
+    replications = (
+        cfg.data.replication
+        if isinstance(cfg.data.replication, list)
+        else [cfg.data.replication]
     )
-
     model_cls, use_conf = CONDITION_MAP[args.condition]
-    if use_conf:
-        train_ds, val_ds, test_ds = (
-            make_ihdp_confounded(ds, effect=cfg.data.confounder_effect)
-            for ds in (train_ds, val_ds, test_ds)
+
+    for rep in replications:
+        logger.info("=== Starting replication %d ===", rep)
+        run_id = f"{args.condition}_rep{rep}_{run_time_str}"
+        rep_cfg = cfg.model_copy(
+            update={"data": cfg.data.model_copy(update={"replication": rep})}
         )
 
-    with wandb.init(
-        project="diffusion-irregular-ehr", id=run_id, config=cfg.model_dump(), reinit=True
-    ) as run:
-        run.define_metric("propnet/*", step_metric="propnet/step")
-        run.define_metric("train/*", step_metric="train/step")
-        run.define_metric("val/*", step_metric="train/step")
+        train_ds, val_ds, test_ds, y_std = load_ihdp(
+            rep_cfg.data.path,
+            replication=rep,
+            train_ratio=rep_cfg.data.train_ratio,
+            test_ratio=rep_cfg.data.test_ratio,
+        )
 
-        propnet = None
-        if model_cls is DiffPO:
-            propnet = _fit_propnet(
-                cfg,
+        if use_conf:
+            train_ds, val_ds, test_ds = (
+                make_ihdp_confounded(ds, effect=cfg.data.confounder_effect)
+                for ds in (train_ds, val_ds, test_ds)
+            )
+
+        with wandb.init(
+            project="diffusion-irregular-ehr",
+            id=run_id,
+            group=f"{args.condition}_{run_time_str}",
+            job_type=args.condition,
+            config=rep_cfg.model_dump(),
+            reinit=True,
+        ) as run:
+            run.define_metric("propnet/*", step_metric="propnet/step")
+            run.define_metric("train/*", step_metric="train/step")
+            run.define_metric("val/*", step_metric="train/step")
+
+            propnet = None
+            if model_cls is DiffPO:
+                propnet = _fit_propnet(
+                    rep_cfg,
+                    train_ds,
+                    val_ds,
+                    test_ds,
+                    log_fn=lambda d, step: run.log({**d, "propnet/step": step}),
+                )
+
+            result_val, result_test = run_condition(
+                run_id,
+                rep_cfg,
                 train_ds,
                 val_ds,
                 test_ds,
-                log_fn=lambda d, step: run.log({**d, "propnet/step": step}),
+                model_cls,
+                propnet,
+                log_fn=lambda d, step: run.log({**d, "train/step": step}),
             )
 
-        result_val, result_test = run_condition(
-            run_id,
-            cfg,
-            train_ds,
-            val_ds,
-            test_ds,
-            model_cls,
-            propnet,
-            log_fn=lambda d, step: run.log({**d, "train/step": step}),
-        )
+            run.log({f"val/{k}": v for k, v in result_val.items()})
+            run.log({f"test/{k}": v for k, v in result_test.items()})
 
-        for k in (
-            "pehe",
-            "rmse_y0",
-            "rmse_y1",
-            "width_95_y0",
-            "width_95_y1",
-            "width_99_y0",
-            "width_99_y1",
-        ):
-            result_val[k] *= y_std
-            result_test[k] *= y_std
+        result = {
+            "config": rep_cfg.model_dump(),
+            "y_std": y_std,
+            "result_val": result_val,
+            "result_test": result_test,
+        }
 
-        run.log({f"val/{k}": v for k, v in result_val.items()})
-        run.log({f"test/{k}": v for k, v in result_test.items()})
-
-    result = {
-        "config": cfg.model_dump(),
-        "y_std": y_std,
-        "result_val": result_val,
-        "result_test": result_test,
-    }
-
-    with open(Path("results") / f"results_{run_id}.json", "w") as f:
-        json.dump(result, f, indent=2)
+        with open(Path("results") / f"results_{run_id}.json", "w") as f:
+            json.dump(result, f, indent=2)

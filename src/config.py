@@ -35,7 +35,7 @@ class TrainConfig(BaseModel):
 
 class DataConfig(BaseModel):
     path: str
-    replication: int
+    replication: int | list[int]
     train_ratio: float
     test_ratio: float
     confounder_effect: float = 0.0
