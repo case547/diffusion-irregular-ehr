@@ -12,7 +12,7 @@ Nonparametric Modeling for Causal Inference), which is as follows:
 where
 
     W -- offset matrix of same dimension as X, every value equal to 0.5
-    β -- regression coefﬁcients vector of length 26 (25 covariates + 1 intercept)
+    β -- regression coefficients vector of length 26 (25 covariates + 1 intercept)
          with each element randomly sampled from (0, 0.1, 0.2, 0.3, 0.4) with
          probabilities (0.6, 0.1, 0.1, 0.1, 0.1)
     ω -- scalar chosen s.t. CATE for both treated and control groups (CATT and CATC,
