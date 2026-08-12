@@ -190,6 +190,18 @@ if __name__ == "__main__":
                 log_fn=lambda d, step: run.log({**d, "train/step": step}),
             )
 
+            for k in (
+                "pehe",
+                "rmse_y0",
+                "rmse_y1",
+                "width_95_y0",
+                "width_95_y1",
+                "width_99_y0",
+                "width_99_y1",
+            ):
+                result_val[k] *= y_std
+                result_test[k] *= y_std
+
             run.log({f"val/{k}": v for k, v in result_val.items()})
             run.log({f"test/{k}": v for k, v in result_test.items()})
 
