@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from src.auxiliary import AuxOutcome, AuxTreatment
+from src.auxiliary import AuxOutcome
 from src.config import DiffusionConfig, ModelConfig
 from src.decoders import ADecoder, XDecoder
 from src.denoiser import Denoiser
@@ -165,7 +165,6 @@ class DiffPOCEVAE(_DiffusionBase):
         self.encoder = ZEncoder(m.feature_dim, m.latent_dim, m.hidden_dim, m.num_layers)
         self.x_decoder = XDecoder(m.latent_dim, m.feature_dim, m.hidden_dim, m.num_layers)
         self.a_decoder = ADecoder(m.latent_dim, m.hidden_dim, m.num_layers)
-        self.aux_treatment = AuxTreatment(m.feature_dim, m.hidden_dim, m.num_layers)
         self.aux_outcome = AuxOutcome(m.feature_dim, m.hidden_dim, m.num_layers)
         self.denoiser = Denoiser(
             latent_dim=m.latent_dim,
@@ -196,7 +195,6 @@ class DiffPOCEVAE(_DiffusionBase):
         eps_pred = self.denoiser(noisy_y, tau, z, a)
         diffusion_loss = (((eps_pred - eps) * factual_mask) ** 2).sum() / factual_mask.sum()
 
-        log_ra = self.aux_treatment.log_prob(x, a).mean()
         log_ry = self.aux_outcome.log_prob(x, a, y_fac).mean()
 
         return {
@@ -204,7 +202,6 @@ class DiffPOCEVAE(_DiffusionBase):
             "log_pa": log_pa,
             "kl": kl,
             "diffusion_loss": diffusion_loss,
-            "log_ra": log_ra,
             "log_ry": log_ry,
         }
 
@@ -215,7 +212,6 @@ class DiffPOCEVAE(_DiffusionBase):
             - components["log_pa"]
             + components["kl"]
             + components["diffusion_loss"]
-            - components["log_ra"]
             - components["log_ry"]
         )
 

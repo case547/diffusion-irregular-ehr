@@ -29,7 +29,6 @@ def test_loss_component_keys_and_shapes():
         "log_pa",
         "kl",
         "diffusion_loss",
-        "log_ra",
         "log_ry",
     }
     for k, v in comps.items():
