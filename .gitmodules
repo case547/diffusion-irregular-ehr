@@ -4,3 +4,6 @@
 [submodule "denoising-diffusion-pytorch"]
 	path = denoising-diffusion-pytorch
 	url = https://github.com/lucidrains/denoising-diffusion-pytorch
+[submodule "CEVAE"]
+	path = CEVAE
+	url = https://github.com/AMLab-Amsterdam/CEVAE
