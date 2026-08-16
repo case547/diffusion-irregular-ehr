@@ -11,7 +11,7 @@ from torch.optim import Adam
 from torch.utils.data import DataLoader
 
 from src.config import Config
-from src.metrics import coverage, pehe, rmse
+from src.metrics import coverage, pehe, rmse, wasserstein
 from src.model import _DiffusionBase
 from src.propensity import PropensityNet
 
@@ -50,11 +50,14 @@ def evaluate(
     loader: DataLoader,
     K: int,
     device: torch.device,
+    sigma: float,
     preds_csv_path: Path | None = None,
     clip_val: float | None = None,
 ) -> dict[str, float]:
-    """Test-time evaluation: generate K PO samples and compute coverage, RMSE, PEHE.
+    """Test-time evaluation: generate K PO samples and compute coverage, RMSE, PEHE, WD.
 
+    sigma: true PO noise std (Hill's Setting B), in the same space as the model's
+        outputs -- pass 1/y_std since outcomes are normalised (see src/metrics.wasserstein).
     preds_csv_path: if given, writes per-subject summary stats to a CSV for diagnostics.
     """
     model.eval()
@@ -118,6 +121,7 @@ def evaluate(
     cov0_95, cov1_95, w0_95, w1_95 = coverage(y0, y1, mu0, mu1, level=0.95)
     cov0_99, cov1_99, w0_99, w1_99 = coverage(y0, y1, mu0, mu1, level=0.99)
     r0, r1 = rmse(y0, y1, mu0, mu1)
+    wd0, wd1 = wasserstein(y0, y1, mu0, mu1, sigma=sigma)
 
     return {
         "coverage_95_y0": cov0_95,
@@ -131,6 +135,8 @@ def evaluate(
         "rmse_y0": r0,
         "rmse_y1": r1,
         "pehe": pehe(y0, y1, mu0, mu1),
+        "wasserstein_y0": wd0,
+        "wasserstein_y1": wd1,
     }
 
 

@@ -61,7 +61,14 @@ def run_condition(
 
     clip_value = 2 * y_abs_max if cfg.diffusion.clip_denoised else None
 
-    result_val = evaluate(model, val_loader, cfg.train.K, device, clip_val=clip_value)
+    assert val_ds.y_std is not None and test_ds.y_std is not None, (
+        "evaluate() needs y_std (set by load_ihdp) to convert the true PO noise std "
+        "into the normalised space the model operates in"
+    )
+
+    result_val = evaluate(
+        model, val_loader, cfg.train.K, device, sigma=1.0 / val_ds.y_std, clip_val=clip_value
+    )
     logger.info(
         "Validation results:\n%s", ", ".join(f"{k}: {v:>8.4f}" for k, v in result_val.items())
     )
@@ -71,7 +78,8 @@ def run_condition(
         test_loader,
         cfg.train.K,
         device,
-        Path("results") / f"preds_{run_id}.csv",
+        sigma=1.0 / test_ds.y_std,
+        preds_csv_path=Path("results") / f"preds_{run_id}.csv",
         clip_val=clip_value,
     )
     logger.info(
@@ -198,6 +206,8 @@ if __name__ == "__main__":
                 "width_95_y1",
                 "width_99_y0",
                 "width_99_y1",
+                "wasserstein_y0",
+                "wasserstein_y1",
             ):
                 result_val[k] *= y_std
                 result_test[k] *= y_std
