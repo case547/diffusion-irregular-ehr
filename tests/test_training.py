@@ -85,7 +85,6 @@ def test_val_loss_finite():
         "log_pa",
         "kl",
         "diffusion_loss",
-        "log_ra",
         "log_ry",
         "total_loss",
     }

@@ -47,9 +47,8 @@ $$
     \tau \sim \mathrm{Unif}\{1,\dots,L\}
   }}
   \left[ \left\| \epsilon - \epsilon_\theta(y_{i,\tau},\, \tau \mid \mathbf{z}_i, a_i) \right\|^2 \right]
-+ \sum_{i=1}^{N} \left[
-    \log r_\phi(a_i \mid \mathbf{x}_i) + \log r_\phi(y_{i,0} \mid \mathbf{x}_i, a_i)
-  \right]
++ \sum_{i=1}^{N}
+    \log r_\phi(y_{i,0} \mid \mathbf{x}_i, a_i)
 $$
 
 where $y_{i,\tau} = \sqrt{\bar\alpha_\tau}\,y_{i,0} + \sqrt{1-\bar\alpha_\tau}\,\epsilon$ and
@@ -98,9 +97,11 @@ The three terms are:
 2. **Noise-matching diffusion loss (from DiffPO):** replaces CEVAE's simple $\log p(y_{i,0} \mid
    a_i, \mathbf{z}_i)$ Gaussian outcome model with a diffusion denoiser conditioned on $\mathbf{z}$
    rather than $\mathbf{x}$.
-3. **Auxiliary prediction terms (from CEVAE):** trains $r_\phi(a \mid \mathbf{x})$ and
-   $r_\phi(y_0 \mid \mathbf{x}, a)$ so that the encoder can be used at test time without observed
-   $(a, y_0)$.
+3. **Auxiliary outcome term (from CEVAE):** trains $r_\phi(y_0 \mid \mathbf{x}, a)$ so that the
+   encoder can be used at test time without an observed $y_0$. There is no analogous auxiliary
+   network for $a$ — the observed treatment is always directly available, at training and at
+   inference, so nothing needs imputing there (see "Full marginalisation over $(a,y)$ at
+   inference" under Considered and Abandoned Approaches).
 
 ### Architecture
 
@@ -129,8 +130,10 @@ Training-only; discarded at inference.
 residual blocks (following DiffPO), conditioned on $\mathbf{z}$ rather than $\mathbf{x}$.
 This is the key structural change from DiffPO.
 
-**Auxiliary networks** $r_\phi(a \mid \mathbf{x})$, $r_\phi(y_0 \mid \mathbf{x}, a)$ — MLPs.
-Trained jointly to supply missing inputs to the encoder at test time.
+**Auxiliary network** $r_\phi(y_0 \mid \mathbf{x}, a)$ — MLP. Trained to supply the missing
+outcome input to the encoder at test time. (An earlier version also trained $r_\phi(a \mid
+\mathbf{x})$ for CEVAE-objective fidelity; it was removed — see "Full marginalisation over
+$(a,y)$ at inference" under Considered and Abandoned Approaches.)
 
 ### Training Procedure
 
@@ -148,8 +151,7 @@ For each mini-batch $\{(\mathbf{x}_i, a_i, y_{i,0})\}_{i=1}^B$:
    $y_{i,\tau} = \sqrt{\bar\alpha_\tau}\,y_{i,0} + \sqrt{1-\bar\alpha_\tau}\,\epsilon$.
 5. **Noise prediction:** compute
    $\|\epsilon - \epsilon_\theta(y_{i,\tau}, \tau \mid \hat{\mathbf{z}}_i, a_i)\|^2$.
-6. **Auxiliary:** compute $\log r_\phi(a_i \mid \mathbf{x}_i)$ and
-   $\log r_\phi(y_{i,0} \mid \mathbf{x}_i, a_i)$.
+6. **Auxiliary:** compute $\log r_\phi(y_{i,0} \mid \mathbf{x}_i, a_i)$.
 7. **Update** $(\phi, \psi, \theta)$ by minimising $-\mathcal{F}$ via stochastic gradient descent.
 
 ### Inference Procedure
@@ -271,9 +273,16 @@ conditions on the observed $a$ at inference, and since the primary goal is close
 DiffPO to isolate the effect of latent confounder estimation, we adopt the same convention.
 Additionally, using the true $a$ is strictly more informative for encoding $\hat{\mathbf{z}}$
 than marginalising over a propensity sample, and avoids a training/inference mismatch where the
-denoiser sees a sampled $\hat{a}$ rather than the true $a$ it was trained with. The auxiliary
-propensity network $r_\phi(a \mid \mathbf{x})$ is still trained (it contributes $\log r_\phi(a
-\mid \mathbf{x})$ to the ELBO) but is not used at inference.
+denoiser sees a sampled $\hat{a}$ rather than the true $a$ it was trained with.
+
+Because $a$ is always directly observed and this design never marginalises over it, the auxiliary
+propensity network $r_\phi(a \mid \mathbf{x})$ (`AuxTreatment`) served no purpose beyond nominally
+completing the CEVAE ELBO term $\log r_\phi(a_i \mid \mathbf{x}_i)$: since that term depends only
+on $(\mathbf{x}, a)$ through its own weights, with no path through $\mathbf{z}$, it never
+influenced the encoder, decoders, or diffusion loss during training, and (as established above)
+was never used at inference either. It has since been removed from the model and objective. The
+outcome auxiliary network $r_\phi(y_0 \mid \mathbf{x}, a)$ is retained, since $y_0$ genuinely is
+unobserved at inference and must be imputed for the encoder to run.
 
 ### Two-stage inference
 
