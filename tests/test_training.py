@@ -85,8 +85,8 @@ def test_val_loss_finite():
         "log_pa",
         "kl",
         "diffusion_loss",
-        "log_qa",
-        "log_qy",
+        "log_ra",
+        "log_ry",
         "total_loss",
     }
     assert all(np.isfinite(v) for v in comps.values())

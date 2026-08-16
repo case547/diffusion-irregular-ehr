@@ -196,16 +196,16 @@ class DiffPOCEVAE(_DiffusionBase):
         eps_pred = self.denoiser(noisy_y, tau, z, a)
         diffusion_loss = (((eps_pred - eps) * factual_mask) ** 2).sum() / factual_mask.sum()
 
-        log_qa = self.aux_treatment.log_prob(x, a).mean()
-        log_qy = self.aux_outcome.log_prob(x, a, y_fac).mean()
+        log_ra = self.aux_treatment.log_prob(x, a).mean()
+        log_ry = self.aux_outcome.log_prob(x, a, y_fac).mean()
 
         return {
             "log_px": log_px,
             "log_pa": log_pa,
             "kl": kl,
             "diffusion_loss": diffusion_loss,
-            "log_qa": log_qa,
-            "log_qy": log_qy,
+            "log_ra": log_ra,
+            "log_ry": log_ry,
         }
 
     def total_loss(self, components: dict[str, torch.Tensor]) -> torch.Tensor:
@@ -215,8 +215,8 @@ class DiffPOCEVAE(_DiffusionBase):
             - components["log_pa"]
             + components["kl"]
             + components["diffusion_loss"]
-            - components["log_qa"]
-            - components["log_qy"]
+            - components["log_ra"]
+            - components["log_ry"]
         )
 
     @torch.no_grad()

@@ -64,8 +64,32 @@ $$\mathcal{L}_\text{diff} = \frac{\displaystyle\sum_{i=1}^{B}\sum_{j\in\{0,1\}} 
 
 The ground-truth $y_\text{cf}$ is only used to construct the noisy denoiser input — it is never
 passed to the encoder and is not required at inference (the reverse process generates both PO slots
-from pure noise). This is not data leakage: the supervision signal still comes only from the
-factual outcome.
+from pure noise, see Inference Procedure below). Because `mapping_noise`/`cond_proj` project the
+full 2-vector $[y_0,y_1]_\tau$ through a shared linear layer before the residual blocks, the
+counterfactual coordinate is technically visible to the parameters that also produce
+$\hat\epsilon_{\theta,a_i}$ — masking the loss alone does not block gradient flow from that input
+path.
+
+This is not exploitable leakage on IHDP-B, however: $\mu_0(\mathbf{x})$ and $\mu_1(\mathbf{x})$
+are deterministic given $\mathbf{x}$ and the per-arm outcome residuals are drawn independently
+(Hill's Response Surface B), so $y_0 \perp y_1 \mid \mathbf{x}$; combined with $\epsilon$ being an
+i.i.d. draw independent of $(\mathbf{x}, a, y_0, y_1)$, the Bayes-optimal $\hat\epsilon_{\theta,a_i}$
+given $(\mathbf{x}, a_i, y_{i,\tau,a_i})$ is unchanged by also observing $y_{i,\tau,1-a_i}$ — the
+counterfactual channel carries no information the factual-arm loss could exploit.
+
+The `momblack` confounding mechanism (see Introducing Confounding below) flips $a_i$ and
+correspondingly swaps $y_i$/$y_{\text{cf},i}$ so the factual label stays consistent with the new
+treatment — but it leaves each subject's underlying potential-outcome pair $(Y_i(0), Y_i(1))$,
+$\mu_0$, $\mu_1$, and the per-arm residual structure unchanged; only the observed/counterfactual
+labelling is relabelled. Since the independence argument above concerns the joint distribution of
+$(Y_i(0), Y_i(1))$ given $\mathbf{x}$, not which one happens to be labelled factual, it continues
+to hold in the hidden-confounder condition.
+
+The mechanism is also identical across both models under comparison — DiffPO and
+DiffPO-CEVAE share the same `_noise_targets`/factual-mask/denoiser-input construction and differ
+only in whether the denoiser conditions on $\mathbf{x}$ or $\hat{\mathbf{z}}$ — so even if this
+pathway carried some signal, it would not differentially advantage one method over the other and
+therefore cannot be the source of any measured DiffPO-vs-DiffPO-CEVAE gap.
 
 The three terms are:
 
@@ -163,16 +187,12 @@ Real covariates and treatment assignments from a clinical trial; synthetic poten
 the standard "Response Surface B" setting. Used quantitatively by CEVAE and qualitatively by
 DiffPO, making it the natural common ground for the hybrid.
 
-**Secondary dataset: ACIC2018.** ~4,000 subjects, 177 anonymised covariates, binary treatment,
-continuous outcomes. DiffPO's primary quantitative benchmark. Evaluating on ACIC2018 allows
-direct comparison against DiffPO's published √PEHE numbers for the full-covariates condition and
-tests whether the hybrid generalises beyond IHDP.
-
 **Experimental structure: 2×2.** Method (DiffPO vs. DiffPO-CEVAE) crossed with data condition
 (full covariates vs. hidden confounder):
 
 - **Full covariates** — both methods trained on the standard covariates with original treatment
-  assignments. Directly comparable to published CEVAE (IHDP) and DiffPO (ACIC2018) baselines.
+  assignments. Directly comparable to published CEVAE (IHDP) baseline, and our DiffPO re-implementation
+  will give us a second baseline.
   Establishes that DiffPO-CEVAE does not degrade when hidden confounding is absent; the latent
   z collapses toward the prior and the model approximately reduces to DiffPO.
 - **Hidden confounder** — both methods trained on the same covariates with a treatment column
@@ -182,9 +202,18 @@ tests whether the hybrid generalises beyond IHDP.
 
 **Introducing confounding on IHDP.** The `momblack` indicator (mother is Black) is obtained from
 Hill's `sim.data` R object and is not present in the standard NPCI covariate set x1–x25. For
-patients with momblack=1, treatment is flipped: $a_i \leftarrow 1 - a_i$. Factual outcomes
-$y_{i,0}$ and ground-truth $\mu_0$, $\mu_1$ are left unchanged. momblack is not present in
-x1–x25, so neither model observes it directly. However, race may be partially recoverable from
+patients with momblack=1, treatment is flipped: $a_i \leftarrow 1 - a_i$. The underlying potential
+outcomes — $\mu_0(\mathbf{x})$, $\mu_1(\mathbf{x})$, and each subject's original per-arm noise
+realisation — are left unchanged; no outcome is resimulated. What does change is which potential
+outcome is *observed*: since the factual outcome is, by definition, whichever potential outcome
+corresponds to the realised treatment, flipping $a_i$ requires swapping $y_i$ and
+$y_{\text{cf},i}$ for the same subjects to keep the pair consistent with the new $a_i$
+(`make_ihdp_confounded`, `src/data.py`). Concretely, a flipped subject's factual outcome becomes
+the value that would have been its counterfactual under the original treatment — the subject's
+$(Y_i(0), Y_i(1))$ pair itself is untouched, only the observed/counterfactual labelling changes.
+
+`momblack` is not present in x1–x25, so neither model observes
+it directly. However, race may be partially recoverable from
 proxy variables already in x — site indicators and maternal education covariates correlate with
 momblack — meaning DiffPO can indirectly account for some of the confounding through these
 proxies. DiffPO-CEVAE's latent z provides a more principled mechanism for absorbing the residual
@@ -192,14 +221,8 @@ confounding that x cannot capture. The expected performance gap between methods 
 moderate rather than dramatic, which reflects realistic EHR settings where a hidden variable
 typically has some observable correlates.
 
-**Introducing confounding on ACIC2018.** With anonymised covariates there is no interpretable
-demographic variable to withhold. A correlation-based mechanism is used instead: identify the
-binary covariate most correlated with treatment assignment in each replicate, then flip treatment
-for all subjects where that covariate equals 1. This is mathematically equivalent to the IHDP
-mechanism and sufficient to test the hypothesis.
-
-Both mechanisms are treatment label corruption rather than classical latent-variable confounding
-(where z causally generates both a and y). They are realistic proxies for a demographic variable
+This mechanism is treatment label corruption rather than classical latent-variable confounding
+(where z causally generates both a and y). It is a realistic proxy for a demographic variable
 absent from the EHR that systematically affected treatment allocation.
 
 **Metrics:** √PEHE (primary causal accuracy), 95% and 99% predictive interval coverage and width
@@ -233,7 +256,7 @@ treatment groups. The TARnet split is better motivated: treatment assignment is 
 $\mathbf{z}$, so the posterior over $\mathbf{z}$ may genuinely differ between treated and control
 patients. Abandoned in favour of the TARnet-split encoder.
 
-### Normalizing flow encoder
+### Normalising flow encoder
 
 Replacing the diagonal Gaussian with a flow-based posterior allows richer, potentially multimodal
 posteriors over $\mathbf{z}$. Abandoned for the initial experiment — the Gaussian approximation is
@@ -307,3 +330,20 @@ not directly carry over to the latent setting. Left as a natural future extensio
    reproduces the correlations in the data without corresponding to the true hidden confounder.
    This is distinct from non-identifiability (limitation 3): even if $\mathbf{z}$ were uniquely
    determined by the data, it need not be causally interpretable.
+
+7. **Counterfactual-conditioned denoiser input.** The diffusion denoiser is trained on the full
+   $[y_0,y_1]_\tau$ vector, so the ground-truth $y_\text{cf}$ passes through the shared
+   `mapping_noise`/`cond_proj` layer even though the loss is factual-masked. The "not data leakage"
+   argument in the Diffusion loss implementation detail above holds only because $y_0 \perp y_1
+   \mid \mathbf{x}$ under Hill's Response Surface B, and this independence is preserved by the
+   treatment-flip confounding mechanism used here — it swaps which potential outcome is labelled
+   factual for flipped subjects, but leaves each subject's underlying $(Y_i(0), Y_i(1))$ pair,
+   $\mu_0$, $\mu_1$, and per-arm residual structure unchanged. It is a property of this DGP, not a
+   guarantee of the architecture: a
+   data-generating process with shared individual-level structure between $y_0$ and $y_1$ beyond
+   $\mathbf{x}$ (e.g. a richer EHR simulator with a common severity latent) would invalidate the
+   argument, since the counterfactual channel would then carry information exploitable by the
+   factual-arm gradient. Any extension to such a DGP would need to re-derive this independence or
+   restructure the denoiser input (e.g. blank the counterfactual coordinate before
+   `mapping_noise`/`cond_proj`) — noting that doing so would itself introduce a train/inference
+   mismatch, since inference always presents both coordinates live.
