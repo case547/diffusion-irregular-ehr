@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from scipy.stats import wasserstein_distance
+from scipy.stats import norm, wasserstein_distance
 
 
 def wasserstein(
@@ -8,20 +8,37 @@ def wasserstein(
     y1: torch.Tensor,
     mu0: torch.Tensor,
     mu1: torch.Tensor,
+    sigma: float,
+    n_true: int = 1000,
 ) -> tuple[float, float]:
     """
-    Mean per-subject 1-Wasserstein distance between K predictive samples & true PO point mass.
+    Mean per-subject 1-Wasserstein distance between K predictive samples and the true
+    PO distribution N(mu, sigma^2) -- Hill's Setting B noise model (sigma=1 in raw
+    outcome units; pass sigma=1/y_std if y0/y1/mu0/mu1 are in normalised space).
+
+    Compared against evenly-spaced quantiles of the true Gaussian rather than Monte
+    Carlo draws from it, so the estimate isn't inflated by sampling noise on the truth
+    side on top of the model's own K-sample noise.
+
     Returns (wd_y0, wd_y1).
     """
     y0_np = y0.cpu().numpy()
     y1_np = y1.cpu().numpy()
     mu0_np = mu0.cpu().numpy()
     mu1_np = mu1.cpu().numpy()
+
+    quantiles = (np.arange(n_true) + 0.5) / n_true
+    z = norm.ppf(quantiles)  # (n_true,) evenly-spaced standard-normal quantiles
+
     wd0 = float(
-        np.mean([wasserstein_distance(y0_np[i], [mu0_np[i]]) for i in range(len(mu0_np))])
+        np.mean(
+            [wasserstein_distance(y0_np[i], mu0_np[i] + sigma * z) for i in range(len(mu0_np))]
+        )
     )
     wd1 = float(
-        np.mean([wasserstein_distance(y1_np[i], [mu1_np[i]]) for i in range(len(mu1_np))])
+        np.mean(
+            [wasserstein_distance(y1_np[i], mu1_np[i] + sigma * z) for i in range(len(mu1_np))]
+        )
     )
     return wd0, wd1
 
