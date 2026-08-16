@@ -50,6 +50,8 @@ def test_run_condition_returns_metrics():
     )
 
     expected_keys = {
+        "wasserstein_y0",
+        "wasserstein_y1",
         "coverage_95_y0",
         "coverage_95_y1",
         "width_95_y0",
@@ -61,8 +63,6 @@ def test_run_condition_returns_metrics():
         "rmse_y0",
         "rmse_y1",
         "pehe",
-        "wasserstein_y0",
-        "wasserstein_y1",
     }
 
     assert set(result_val.keys()) == expected_keys

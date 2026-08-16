@@ -142,7 +142,7 @@ if __name__ == "__main__":
 
     for rep in replications:
         logger.info("=== Starting replication %d ===", rep)
-        run_id = f"{args.condition}_rep{rep}_{run_time_str}"
+        run_id = f"{args.condition}_{run_time_str}_rep{rep}"
         rep_cfg = cfg.model_copy(
             update={"data": cfg.data.model_copy(update={"replication": rep})}
         )
@@ -152,7 +152,7 @@ if __name__ == "__main__":
         # an unseeded RNG stream and makes naive_full/naive_conf non-reproducible.
         torch.manual_seed(rep_cfg.train.seed)
 
-        train_ds, val_ds, test_ds, y_std = load_ihdp(
+        train_ds, val_ds, test_ds, ytrain_std = load_ihdp(
             rep_cfg.data.path,
             replication=rep,
             train_ratio=rep_cfg.data.train_ratio,
@@ -199,25 +199,25 @@ if __name__ == "__main__":
             )
 
             for k in (
-                "pehe",
-                "rmse_y0",
-                "rmse_y1",
+                "wasserstein_y0",
+                "wasserstein_y1",
                 "width_95_y0",
                 "width_95_y1",
                 "width_99_y0",
                 "width_99_y1",
-                "wasserstein_y0",
-                "wasserstein_y1",
+                "rmse_y0",
+                "rmse_y1",
+                "pehe",
             ):
-                result_val[k] *= y_std
-                result_test[k] *= y_std
+                result_val[k] *= ytrain_std
+                result_test[k] *= ytrain_std
 
             run.log({f"val/{k}": v for k, v in result_val.items()})
             run.log({f"test/{k}": v for k, v in result_test.items()})
 
         result = {
             "config": rep_cfg.model_dump(),
-            "y_std": y_std,
+            "y_std": ytrain_std,
             "result_val": result_val,
             "result_test": result_test,
         }

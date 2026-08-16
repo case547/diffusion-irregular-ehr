@@ -124,6 +124,8 @@ def evaluate(
     wd0, wd1 = wasserstein(y0, y1, mu0, mu1, sigma=sigma)
 
     return {
+        "wasserstein_y0": wd0,
+        "wasserstein_y1": wd1,
         "coverage_95_y0": cov0_95,
         "coverage_95_y1": cov1_95,
         "width_95_y0": w0_95,
@@ -135,8 +137,6 @@ def evaluate(
         "rmse_y0": r0,
         "rmse_y1": r1,
         "pehe": pehe(y0, y1, mu0, mu1),
-        "wasserstein_y0": wd0,
-        "wasserstein_y1": wd1,
     }
 
 
