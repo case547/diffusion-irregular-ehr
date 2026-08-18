@@ -171,6 +171,56 @@ class _DiffusionBase(nn.Module, ABC):
             return y, torch.stack(y_traj, dim=0), torch.stack(eps_traj, dim=0)
         return y
 
+    def _ddim_reverse(
+        self,
+        BK: int,
+        cond: torch.Tensor,
+        a_rep: torch.Tensor,
+        device: torch.device,
+        y_init: torch.Tensor | None = None,
+        clip_val: float | None = None,
+        log_trajectory: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Deterministic (eta=0) DDIM reverse loop. cond is z (DiffPOCEVAE) or x_rep (DiffPO).
+        See https://arxiv.org/abs/2010.02502 for details.
+
+        y_init, if given, is used as the starting noise y_L instead of a fresh torch.randn
+        draw -- passing the same y_init to two models' _ddim_reverse calls guarantees they
+        start from an identical noise state, which is what the confounding-diffusion-analysis
+        notebook relies on for its paired-trajectory comparison.
+
+        Returns (BK,2), or (y_final, y_traj, eps_traj) each (L,BK,2) when log_trajectory=True,
+        logging the state entering each step and the denoiser's predicted noise there, in step
+        order from tau=L-1 down to tau=0 (same convention as _ddpm_reverse).
+        """
+        y = torch.randn(BK, 2, device=device) if y_init is None else y_init.clone()
+        y_traj: list[torch.Tensor] = []
+        eps_traj: list[torch.Tensor] = []
+
+        for step in range(self.L - 1, -1, -1):
+            tau = torch.full((BK,), step, device=device, dtype=torch.long)
+            eps_pred = self.denoiser(y, tau, cond, a_rep)
+
+            if log_trajectory:
+                y_traj.append(y.clone())
+                eps_traj.append(eps_pred.clone())
+
+            alpha_bar = self.alpha_bar_sched[step]
+            alpha_bar_safe = alpha_bar.clamp(min=1e-15)
+            y0_pred = (y - (1.0 - alpha_bar).sqrt() * eps_pred) / alpha_bar_safe.sqrt()
+            if clip_val is not None:
+                y0_pred = y0_pred.clamp(-clip_val, clip_val)
+
+            if step > 0:
+                alpha_bar_prev = self.alpha_bar_sched[step - 1]
+                y = alpha_bar_prev.sqrt() * y0_pred + (1.0 - alpha_bar_prev).sqrt() * eps_pred
+            else:
+                y = y0_pred
+
+        if log_trajectory:
+            return y, torch.stack(y_traj, dim=0), torch.stack(eps_traj, dim=0)
+        return y
+
 
 class HybridModel(_DiffusionBase):
     """
@@ -436,3 +486,19 @@ class DiffPO(_DiffusionBase):
         a_rep = a.repeat_interleave(K, dim=0)
         y = self._ddpm_reverse(BK, x_rep, a_rep, device, clip_val).reshape(B, K, 2)
         return y[:, :, 0], y[:, :, 1]
+
+    @torch.no_grad()
+    def sample_ddim(
+        self,
+        x: torch.Tensor,
+        a: torch.Tensor,
+        y_init: torch.Tensor | None = None,
+        clip_val: float | None = None,
+        log_trajectory: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Deterministic DDIM sample, one trajectory per subject. Returns y (B,2), or
+        (y, y_traj, eps_traj) each (L,B,2) when log_trajectory=True. See _ddim_reverse."""
+        B, device = x.shape[0], x.device
+        return self._ddim_reverse(
+            B, x, a, device, y_init=y_init, clip_val=clip_val, log_trajectory=log_trajectory
+        )

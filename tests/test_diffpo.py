@@ -119,3 +119,37 @@ def test_ddpm_reverse_log_trajectory_shapes():
     assert torch.isfinite(y_final).all()
     assert torch.isfinite(y_traj).all()
     assert torch.isfinite(eps_traj).all()
+
+
+def test_sample_ddim_shapes():
+    model = DiffPO(VAE_CFG, DIFF_CFG)
+    x = torch.randn(B, F)
+    a = torch.randint(0, 2, (B,)).float()
+    y = model.sample_ddim(x, a)
+    assert y.shape == (B, 2)
+    assert torch.isfinite(y).all()
+
+
+def test_sample_ddim_deterministic_with_shared_y_init():
+    """The whole confounding-diffusion-analysis notebook depends on this: two separate
+    sample_ddim calls given the same y_init must produce bit-identical trajectories, so
+    that any difference between two models' outputs is due to the models, not RNG luck."""
+    model = DiffPO(VAE_CFG, DIFF_CFG)
+    x = torch.randn(B, F)
+    a = torch.randint(0, 2, (B,)).float()
+    y_init = torch.randn(B, 2)
+
+    y1 = model.sample_ddim(x, a, y_init=y_init)
+    y2 = model.sample_ddim(x, a, y_init=y_init)
+    assert torch.equal(y1, y2)
+
+
+def test_sample_ddim_log_trajectory_shapes():
+    model = DiffPO(VAE_CFG, DIFF_CFG)
+    x = torch.randn(B, F)
+    a = torch.randint(0, 2, (B,)).float()
+    y, y_traj, eps_traj = model.sample_ddim(x, a, log_trajectory=True)
+    assert y.shape == (B, 2)
+    assert y_traj.shape == (DIFF_CFG.num_steps, B, 2)
+    assert eps_traj.shape == (DIFF_CFG.num_steps, B, 2)
+    assert torch.isfinite(y).all()
