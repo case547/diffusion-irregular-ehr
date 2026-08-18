@@ -5,20 +5,34 @@ from src.metrics import coverage, pehe, rmse, wasserstein
 B, K = 20, 100
 
 
-def test_wasserstein_near_zero_for_accurate_predictions():
+def test_wasserstein_near_zero_when_matching_true_distribution():
+    sigma = 1.0
+    mu0 = torch.zeros(B)
+    mu1 = torch.ones(B)
+    y0 = mu0.unsqueeze(1) + torch.randn(B, K) * sigma
+    y1 = mu1.unsqueeze(1) + torch.randn(B, K) * sigma
+    wd0, wd1 = wasserstein(y0, y1, mu0, mu1, sigma=sigma)
+    assert wd0 < 0.2
+    assert wd1 < 0.2
+
+
+def test_wasserstein_large_for_overconcentrated_predictions():
+    """Samples that ignore the true noise (sigma=1) and collapse onto mu should be
+    penalised, unlike the old point-mass metric where this was the "perfect" case."""
+    sigma = 1.0
     mu0 = torch.zeros(B)
     mu1 = torch.ones(B)
     y0 = mu0.unsqueeze(1) + torch.randn(B, K) * 0.01
     y1 = mu1.unsqueeze(1) + torch.randn(B, K) * 0.01
-    wd0, wd1 = wasserstein(y0, y1, mu0, mu1)
-    assert wd0 < 0.05
-    assert wd1 < 0.05
+    wd0, wd1 = wasserstein(y0, y1, mu0, mu1, sigma=sigma)
+    assert wd0 > 0.5
+    assert wd1 > 0.5
 
 
 def test_wasserstein_nonnegative():
     y0, y1 = torch.randn(B, K), torch.randn(B, K)
     mu0, mu1 = torch.zeros(B), torch.zeros(B)
-    wd0, wd1 = wasserstein(y0, y1, mu0, mu1)
+    wd0, wd1 = wasserstein(y0, y1, mu0, mu1, sigma=1.0)
     assert wd0 >= 0.0
     assert wd1 >= 0.0
 
