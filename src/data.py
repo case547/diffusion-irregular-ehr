@@ -132,13 +132,14 @@ def make_ihdp_confounded(ds: CausalDataset, effect: float = 0.0) -> CausalDatase
 
     Two independent mechanisms, applied in sequence:
 
-    1. Direct outcome effect (skipped entirely if effect == 0): momblack shifts the
-       true potential outcomes by the same rule Hill's response surface B uses for
-       every other covariate -- multiplicative for mu0 (which lives in log-space,
-       mu0 = exp(beta.X)), additive for mu1 (mu1 = beta.X). This asymmetry matters:
-       a *shared* level shift (mu0 += c, mu1 += c) would cancel exactly out of
-       mu1-mu0, leaving PEHE unbiased (only rmse_y0/rmse_y1 would move) -- using
-       Hill's own asymmetric structure instead avoids that trap for free.
+    1. Direct outcome effect (skipped entirely if effect == 0)
+
+       momblack shifts the true potential outcomes by the same rule Hill's response
+       surface B uses for every other covariate -- multiplicative for mu0 (which
+       lives in log-space, mu0 = exp(beta.X)), additive for mu1 (mu1 = beta.X). This
+       asymmetry matters: a *shared* level shift (mu0 += c, mu1 += c) would cancel
+       exactly out of mu1-mu0, leaving PEHE unbiased (only rmse_y0/rmse_y1 would move)
+       -- using Hill's own asymmetric structure instead avoids that trap for free.
 
        ds.y_mean/ds.y_std (set by load_ihdp) are required whenever effect != 0.
        load_ihdp normalises mu0/mu1/y/y_cf to the training split's scale, but Hill's
@@ -154,8 +155,10 @@ def make_ihdp_confounded(ds: CausalDataset, effect: float = 0.0) -> CausalDatase
        resampling fresh noise, so the only thing that changes is the systematic
        shift, not also unrelated randomness.
 
-    2. Selection effect: treatment is flipped for confounder==1 subjects (momblack
-       is not in x1-x25, but is partially recoverable via proxy variables).
+    2. Selection effect
+
+       treatment is flipped for confounder==1 subjects (momblack is not in x1-x25,
+       but is partially recoverable via proxy variables).
 
        Flipping treatment changes which potential outcome is factual vs
        counterfactual, so y/y_cf are swapped for flipped subjects to stay
