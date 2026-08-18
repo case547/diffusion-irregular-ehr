@@ -106,13 +106,25 @@ class _DiffusionBase(nn.Module):
         a_rep: torch.Tensor,
         device: torch.device,
         clip_val: float | None = None,
-    ) -> torch.Tensor:
-        """DDPM reverse loop. cond is z (DiffPOCEVAE) or x_rep (DiffPO). Returns (BK,2)."""
+        log_trajectory: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """DDPM reverse loop. cond is z (DiffPOCEVAE) or x_rep (DiffPO). Returns (BK,2).
+
+        When log_trajectory=True, also returns (y_traj, eps_traj) each (L,BK,2): the state
+        entering each step and the denoiser's predicted noise there, in step order from
+        tau=L-1 down to tau=0.
+        """
         y = torch.randn(BK, 2, device=device)
+        y_traj: list[torch.Tensor] = []
+        eps_traj: list[torch.Tensor] = []
 
         for step in range(self.L - 1, -1, -1):
             tau = torch.full((BK,), step, device=device, dtype=torch.long)
             eps_pred = self.denoiser(y, tau, cond, a_rep)
+
+            if log_trajectory:
+                y_traj.append(y.clone())
+                eps_traj.append(eps_pred.clone())
 
             alpha_bar = self.alpha_bar_sched[step]
             beta = self.beta_sched[step]
@@ -145,6 +157,8 @@ class _DiffusionBase(nn.Module):
             else:
                 y = mu if clip_val is None else clean_pred
 
+        if log_trajectory:
+            return y, torch.stack(y_traj, dim=0), torch.stack(eps_traj, dim=0)
         return y
 
 
