@@ -78,7 +78,9 @@ for num_steps, beta_end, ckpt_path in RUNS:
     model.eval()
 
     torch.manual_seed(0)
-    result_val = evaluate(model, val_loader, TRAIN_CFG.K, device, clip_val=clip_value)
+    result_val = evaluate(
+        model, val_loader, TRAIN_CFG.K, device, sigma=1.0 / y_std, clip_val=clip_value
+    )
     for k in (
         "pehe",
         "rmse_y0",

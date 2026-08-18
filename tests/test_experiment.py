@@ -39,7 +39,8 @@ def _ds(n=32, f=5):
     y_cf = np.random.randn(n).astype(np.float32)
     mu0 = np.random.randn(n).astype(np.float32)
     mu1 = np.random.randn(n).astype(np.float32)
-    return CausalDataset(x, a, y, y_cf, mu0, mu1)
+    conf = np.zeros(n, dtype=np.float32)
+    return CausalDataset(x, a, y, y_cf, mu0, mu1, conf, y_mean=0.0, y_std=1.0)
 
 
 def test_run_condition_returns_metrics():
@@ -49,6 +50,8 @@ def test_run_condition_returns_metrics():
     )
 
     expected_keys = {
+        "wasserstein_y0",
+        "wasserstein_y1",
         "coverage_95_y0",
         "coverage_95_y1",
         "width_95_y0",

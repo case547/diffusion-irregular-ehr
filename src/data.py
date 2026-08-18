@@ -105,11 +105,11 @@ def load_ihdp(
     )
 
     y_mean = y[idx_train].mean()
-    y_std = y[idx_train].std() + 1e-8
-    y = (y - y_mean) / y_std
-    y_cf = (y_cf - y_mean) / y_std
-    mu0 = (mu0 - y_mean) / y_std
-    mu1 = (mu1 - y_mean) / y_std
+    ytrain_std = y[idx_train].std() + 1e-8
+    y = (y - y_mean) / ytrain_std
+    y_cf = (y_cf - y_mean) / ytrain_std
+    mu0 = (mu0 - y_mean) / ytrain_std
+    mu1 = (mu1 - y_mean) / ytrain_std
 
     def _make(idx_):
         return CausalDataset(
@@ -121,10 +121,10 @@ def load_ihdp(
             mu1[idx_],
             confounder[idx_],
             float(y_mean),
-            float(y_std),
+            float(ytrain_std),
         )
 
-    return _make(idx_train), _make(idx_val), _make(idx_test), float(y_std)
+    return _make(idx_train), _make(idx_val), _make(idx_test), float(ytrain_std)
 
 
 def make_ihdp_confounded(ds: CausalDataset, effect: float = 0.0) -> CausalDataset:
