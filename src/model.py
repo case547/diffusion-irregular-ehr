@@ -110,9 +110,9 @@ class _DiffusionBase(nn.Module):
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """DDPM reverse loop. cond is z (DiffPOCEVAE) or x_rep (DiffPO). Returns (BK,2).
 
-        When log_trajectory=True, also returns (y_traj, eps_traj) each (L,BK,2): the state
-        entering each step and the denoiser's predicted noise there, in step order from
-        tau=L-1 down to tau=0.
+        When log_trajectory=True, returns (y, y_traj, eps_traj) instead: y is (BK,2) as
+        above, and y_traj/eps_traj are each (L,BK,2), logging the state entering each step
+        and the denoiser's predicted noise there, in step order from tau=L-1 down to tau=0.
         """
         y = torch.randn(BK, 2, device=device)
         y_traj: list[torch.Tensor] = []
@@ -366,7 +366,8 @@ class DiffPO(_DiffusionBase):
         log_trajectory: bool = False,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Deterministic DDIM sample, one trajectory per subject. Returns y (B,2), or
-        (y, y_traj, eps_traj) each (L,B,2) when log_trajectory=True. See _ddim_reverse."""
+        (y, y_traj, eps_traj) when log_trajectory=True -- y is (B,2), y_traj/eps_traj are
+        each (L,B,2). See _ddim_reverse."""
         B, device = x.shape[0], x.device
         return self._ddim_reverse(
             B, x, a, device, y_init=y_init, clip_val=clip_val, log_trajectory=log_trajectory
