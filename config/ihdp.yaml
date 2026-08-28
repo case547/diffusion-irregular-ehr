@@ -14,6 +14,7 @@ diffusion:
   hidden_dim: 32       # output head width (output_projection1/2, y0/y1 layers); contracts like DiffPO (cond_dim -> hidden_dim)
   num_blocks: 4        # number of residual blocks
   clip_denoised: True  # whether to clip denoised predictions during reverse diffusion
+  use_propnet: True    # whether to use PropensityNet to weight HybridModel's diffusion loss
 
 train:
   epochs: 500

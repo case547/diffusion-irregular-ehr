@@ -1,4 +1,4 @@
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 
 import numpy as np
 import torch
@@ -12,7 +12,7 @@ from src.encoder import ZEncoder
 from src.propensity import PropensityNet
 
 
-class _DiffusionBase(nn.Module):
+class _DiffusionBase(nn.Module, ABC):
     """Shared noise schedule and DDPM helpers for HybridModel and DiffPO."""
 
     denoiser: Denoiser
@@ -81,23 +81,57 @@ class _DiffusionBase(nn.Module):
         )  # (B,2)
 
     def _noise_targets(
-        self, x: torch.Tensor, a: torch.Tensor, y_fac: torch.Tensor, y_cf: torch.Tensor
+        self,
+        batch_size: int,
+        device: torch.device,
+        a: torch.Tensor,
+        y_fac: torch.Tensor,
+        y_cf: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Assemble noised [y0,y1] and factual mask.
 
         Returns (noisy_y, tau, eps, factual_mask).
         """
-        B = x.shape[0]
+        B = batch_size
 
         y_both = self._assemble_yboth(a, y_fac, y_cf)  # (B,2)
         factual_mask = torch.stack([1 - a, a], dim=1)  # (B,2)
 
-        tau = torch.randint(0, self.L, (B,), device=x.device)
-        eps = torch.randn(B, 2, device=x.device)
+        tau = torch.randint(0, self.L, (B,), device=device)
+        eps = torch.randn(B, 2, device=device)
         ab_tau = self.alpha_bar_sched[tau].unsqueeze(1)  # (B,1)
         noisy_y = ab_tau.sqrt() * y_both + (1.0 - ab_tau).sqrt() * eps
 
         return noisy_y, tau, eps, factual_mask
+
+    def calculate_diffusion_loss(
+        self,
+        eps: torch.Tensor,
+        eps_pred: torch.Tensor,
+        factual_mask: torch.Tensor,
+        x: torch.Tensor | None = None,
+        a: torch.Tensor | None = None,
+        propnet: PropensityNet | None = None,
+    ) -> torch.Tensor:
+        """Calculate the diffusion loss term E_z,τ,ε[‖ε - ε_θ(⋅)‖²]
+
+        Optionally weighted by IPW if a PropensityNet is provided. Returns a scalar loss value.
+        """
+        per_sample = (((eps_pred - eps) * factual_mask) ** 2).sum(dim=1)
+
+        if propnet is not None:
+            if x is None or a is None:
+                raise ValueError(
+                    "x and a must be provided if propnet is not None for IPW weighting"
+                )
+
+            with torch.no_grad():
+                ipw = propnet.get_importance_weights(x, a)
+            ipw = ipw.clamp(0.5, 3.0)
+            ipw = ipw / ipw.mean()
+            return (per_sample * ipw).mean()
+        else:
+            return per_sample.mean()
 
     def _ddpm_reverse(
         self,
@@ -156,7 +190,10 @@ class HybridModel(_DiffusionBase):
       F = E_z[log p_ψ(x|z) + log p_ψ(a|z)]
           - KL[r_φ(z|x,a,y) ‖ N(0,I)]
           - E_z,τ,ε[‖ε - ε_θ(y_τ,τ|z,a)‖²]
-          + log r_φ(a|x) + log r_φ(y|x,a)
+          + log r_φ(y|x,a)
+
+    Optional IPW weighting of the diffusion term via a pre-trained frozen PropensityNet,
+    matching DiffPO's.
     """
 
     def __init__(self, model_cfg: ModelConfig, diffusion_cfg: DiffusionConfig):
@@ -182,7 +219,7 @@ class HybridModel(_DiffusionBase):
         a: torch.Tensor,
         y_fac: torch.Tensor,
         y_cf: torch.Tensor,
-        propnet=None,  # accepted for API compatibility with _train_loop; ignored
+        propnet: PropensityNet | None = None,
     ) -> dict[str, torch.Tensor]:
         # Encode -- reparameterised; z retains grad for full end-to-end training
         z, mu, sigma = self.encoder.rsample(x, a, y_fac)
@@ -191,9 +228,14 @@ class HybridModel(_DiffusionBase):
         log_pa = self.a_decoder.log_prob(z, a).mean()
         kl = 0.5 * (mu.pow(2) + sigma.pow(2) - 2.0 * sigma.log() - 1.0).sum(-1).mean()
 
-        noisy_y, tau, eps, factual_mask = self._noise_targets(x, a, y_fac, y_cf)
-        eps_pred = self.denoiser(noisy_y, tau, z, a)
-        diffusion_loss = (((eps_pred - eps) * factual_mask) ** 2).sum() / factual_mask.sum()
+        noisy_y, tau, eps, factual_mask = self._noise_targets(
+            x.shape[0], x.device, a, y_fac, y_cf
+        )
+        eps_pred: torch.Tensor = self.denoiser(noisy_y, tau, z, a)
+
+        diffusion_loss = self.calculate_diffusion_loss(
+            eps, eps_pred, factual_mask, x, a, propnet
+        )
 
         log_ry = self.aux_outcome.log_prob(x, a, y_fac).mean()
 
@@ -260,22 +302,13 @@ class DiffPO(_DiffusionBase):
         y_cf: torch.Tensor,
         propnet: PropensityNet | None = None,
     ) -> dict[str, torch.Tensor]:
-        noisy_y, tau, eps, factual_mask = self._noise_targets(x, a, y_fac, y_cf)
-
+        noisy_y, tau, eps, factual_mask = self._noise_targets(
+            x.shape[0], x.device, a, y_fac, y_cf
+        )
         eps_pred: torch.Tensor = self.denoiser(noisy_y, tau, x, a)
-        per_sample: torch.Tensor = (((eps_pred - eps) * factual_mask) ** 2).sum(
-            dim=1
-        ) / factual_mask.sum(dim=1)
-
-        if propnet is not None:
-            with torch.no_grad():
-                ipw = propnet.get_importance_weights(x, a)
-            ipw = ipw.clamp(0.5, 3.0)
-            ipw = ipw / ipw.mean()
-            diffusion_loss = (per_sample * ipw).mean()
-        else:
-            diffusion_loss = per_sample.mean()
-
+        diffusion_loss = self.calculate_diffusion_loss(
+            eps, eps_pred, factual_mask, x, a, propnet
+        )
         return {"diffusion_loss": diffusion_loss}
 
     def total_loss(self, components: dict[str, torch.Tensor]) -> torch.Tensor:

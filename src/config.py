@@ -18,6 +18,7 @@ class DiffusionConfig(BaseModel):
     hidden_dim: int
     num_blocks: int
     clip_denoised: bool = False
+    use_propnet: bool = False
 
 
 class TrainConfig(BaseModel):
