@@ -16,18 +16,7 @@ SMALL_CFG = Config(
         hidden_dim=32,
         num_blocks=2,
     ),
-    train=TrainConfig(
-        epochs=2,
-        batch_size=8,
-        lr=1e-3,
-        seed=0,
-        K=3,
-        use_final_model=False,
-        early_stopping=True,
-        patience=999,
-        warmup_epochs=0,
-        checkpoint_dir="/tmp",
-    ),
+    train=TrainConfig(epochs=2, batch_size=8, lr=1e-3, seed=0, K=3, checkpoint_dir="/tmp"),
     data=DataConfig(path="data/ihdp", replication=1, train_ratio=0.7, test_ratio=0.15),
 )
 

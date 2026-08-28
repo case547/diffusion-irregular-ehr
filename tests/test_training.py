@@ -98,16 +98,7 @@ def test_checkpoint_saved(tmp_path):
         model=MODEL_CFG,
         diffusion=DIFF_CFG,
         train=TrainConfig(
-            epochs=4,
-            batch_size=16,
-            lr=1e-3,
-            seed=2,
-            K=2,
-            use_final_model=False,
-            early_stopping=True,
-            patience=10,
-            warmup_epochs=0,
-            checkpoint_dir=str(tmp_path),
+            epochs=4, batch_size=16, lr=1e-3, seed=2, K=2, checkpoint_dir=str(tmp_path)
         ),
         data=DataConfig(path="data/ihdp", replication=1, train_ratio=0.7, test_ratio=0.15),
     )
@@ -119,7 +110,7 @@ def test_checkpoint_saved(tmp_path):
     Path(cfg.train.checkpoint_dir).mkdir(parents=True, exist_ok=True)
     run_id = "pytest_run"
     _train_loop(model, loader, loader, cfg, device, run_id)
-    ckpt_path = Path(cfg.train.checkpoint_dir) / f"best_model_{run_id}.pth"
+    ckpt_path = Path(cfg.train.checkpoint_dir) / f"final_model_{run_id}.pth"
     assert ckpt_path.exists()
     model2 = DiffPOCEVAE(cfg.model, cfg.diffusion)
     model2.load_state_dict(torch.load(ckpt_path, map_location="cpu"))  # must not raise
