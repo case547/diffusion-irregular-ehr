@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader
 
 from src.config import Config
 from src.data import CausalDataset, load_ihdp, make_ihdp_confounded
-from src.model import DiffPO, DiffPOCEVAE, _DiffusionBase
+from src.model import DiffPO, HybridModel, _DiffusionBase
 from src.propensity import PropensityNet
 from train import _train_loop, evaluate
 
@@ -26,7 +26,7 @@ def run_condition(
     train_ds: CausalDataset,
     val_ds: CausalDataset,
     test_ds: CausalDataset,
-    model_cls: type[_DiffusionBase] = DiffPOCEVAE,
+    model_cls: type[_DiffusionBase] = HybridModel,
     propnet: PropensityNet | None = None,
     log_fn: Callable | None = None,
 ) -> tuple[dict[str, float], dict[str, float]]:
@@ -97,8 +97,8 @@ def _fit_propnet(
 CONDITION_MAP = {
     "naive_full": (DiffPO, False),
     "naive_conf": (DiffPO, True),
-    "hybrid_full": (DiffPOCEVAE, False),
-    "hybrid_conf": (DiffPOCEVAE, True),
+    "hybrid_full": (HybridModel, False),
+    "hybrid_conf": (HybridModel, True),
 }
 
 if __name__ == "__main__":

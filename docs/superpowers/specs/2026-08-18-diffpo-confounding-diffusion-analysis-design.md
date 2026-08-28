@@ -54,9 +54,9 @@ update rule, so it is the more mechanistically direct thing to plot for those co
    are the same subjects where DiffPO's point predictions are worse, and this concentrates on
    `momblack`-flipped subjects — tying the mechanism to the measured accuracy degradation.
 
-This is scoped to `DiffPO` only (`src/model.py`) — no `DiffPOCEVAE`, no latent $\mathbf{z}$. The
+This is scoped to `DiffPO` only (`src/model.py`) — no `HybridModel`, no latent $\mathbf{z}$. The
 sampler being added is written on the shared `_DiffusionBase` class, so it is available to
-`DiffPOCEVAE` for a future extension of this analysis without rework.
+`HybridModel` for a future extension of this analysis without rework.
 
 ---
 
@@ -243,7 +243,7 @@ the analysis needs fine temporal resolution to locate *where* divergence appears
 clip-investigation analysis. Considered following that precedent again here. Rejected in favour of
 a proper `_ddim_reverse` method on `_DiffusionBase`: this analysis needs the sampler called twice
 per subject with careful control over shared initial noise and mid-trajectory model-swapping,
-which is easier to get right (and reuse for `DiffPOCEVAE` later) as tested library code than as
+which is easier to get right (and reuse for `HybridModel` later) as tested library code than as
 duplicated notebook logic.
 
 ### Comparing raw per-model trajectories directly ($\epsilon_\theta^\text{conf}(y_\tau^\text{conf})$ vs. $\epsilon_\theta^\text{clean}(y_\tau^\text{clean})$)

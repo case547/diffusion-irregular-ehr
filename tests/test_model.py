@@ -1,7 +1,7 @@
 import torch
 
 from src.config import DiffusionConfig, ModelConfig
-from src.model import DiffPOCEVAE
+from src.model import HybridModel
 
 MODEL_CFG = ModelConfig(feature_dim=5, latent_dim=4, hidden_dim=16, num_layers=2)
 DIFF_CFG = DiffusionConfig(
@@ -22,7 +22,7 @@ def _batch():
 
 
 def test_loss_component_keys_and_shapes():
-    model = DiffPOCEVAE(MODEL_CFG, DIFF_CFG)
+    model = HybridModel(MODEL_CFG, DIFF_CFG)
     comps = model.compute_loss(*_batch())
     assert set(comps.keys()) == {
         "log_px",
@@ -36,21 +36,21 @@ def test_loss_component_keys_and_shapes():
 
 
 def test_loss_components_finite():
-    model = DiffPOCEVAE(MODEL_CFG, DIFF_CFG)
+    model = HybridModel(MODEL_CFG, DIFF_CFG)
     comps = model.compute_loss(*_batch())
     for k, v in comps.items():
         assert torch.isfinite(v), f"{k} = {v}"
 
 
 def test_total_loss_finite():
-    model = DiffPOCEVAE(MODEL_CFG, DIFF_CFG)
+    model = HybridModel(MODEL_CFG, DIFF_CFG)
     loss = model.total_loss(model.compute_loss(*_batch()))
     assert loss.shape == ()
     assert torch.isfinite(loss)
 
 
 def test_backward():
-    model = DiffPOCEVAE(MODEL_CFG, DIFF_CFG)
+    model = HybridModel(MODEL_CFG, DIFF_CFG)
     loss = model.total_loss(model.compute_loss(*_batch()))
     loss.backward()
     assert model.encoder.trunk[0].weight.grad is not None
@@ -58,7 +58,7 @@ def test_backward():
 
 
 def test_sample_outcomes_shapes():
-    model = DiffPOCEVAE(MODEL_CFG, DIFF_CFG)
+    model = HybridModel(MODEL_CFG, DIFF_CFG)
     K = 3
     a = torch.randint(0, 2, (B,)).float()
     y0, y1 = model.sample_outcomes(torch.randn(B, F), a, K=K)

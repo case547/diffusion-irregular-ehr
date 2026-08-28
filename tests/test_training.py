@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 
 from src.config import Config, DataConfig, DiffusionConfig, ModelConfig, TrainConfig
 from src.data import CausalDataset
-from src.model import DiffPOCEVAE
+from src.model import HybridModel
 from train import calculate_val_loss
 
 MODEL_CFG = ModelConfig(feature_dim=5, latent_dim=4, hidden_dim=16, num_layers=2)
@@ -39,7 +39,7 @@ def test_one_training_step():
     torch.manual_seed(0)
     np.random.seed(0)
     loader = _loader()
-    model = DiffPOCEVAE(MODEL_CFG, DIFF_CFG)
+    model = HybridModel(MODEL_CFG, DIFF_CFG)
     opt = Adam(model.parameters(), lr=1e-3)
     model.train()
     batch = next(iter(loader))
@@ -56,7 +56,7 @@ def test_loss_decreases_over_20_steps():
     torch.manual_seed(1)
     np.random.seed(1)
     loader = _loader(n=64, batch_size=64)
-    model = DiffPOCEVAE(MODEL_CFG, DIFF_CFG)
+    model = HybridModel(MODEL_CFG, DIFF_CFG)
     opt = Adam(model.parameters(), lr=1e-2)
     model.train()
     losses = []
@@ -76,7 +76,7 @@ def test_loss_decreases_over_20_steps():
 
 def test_val_loss_finite():
     torch.manual_seed(2)
-    model = DiffPOCEVAE(MODEL_CFG, DIFF_CFG)
+    model = HybridModel(MODEL_CFG, DIFF_CFG)
     loader = _loader()
     device = torch.device("cpu")
     comps = calculate_val_loss(model, loader, device)
@@ -105,12 +105,12 @@ def test_checkpoint_saved(tmp_path):
     from train import _train_loop
 
     loader = _loader(n=32, f=5, batch_size=16)
-    model = DiffPOCEVAE(cfg.model, cfg.diffusion)
+    model = HybridModel(cfg.model, cfg.diffusion)
     device = torch.device("cpu")
     Path(cfg.train.checkpoint_dir).mkdir(parents=True, exist_ok=True)
     run_id = "pytest_run"
     _train_loop(model, loader, loader, cfg, device, run_id)
     ckpt_path = Path(cfg.train.checkpoint_dir) / f"final_model_{run_id}.pth"
     assert ckpt_path.exists()
-    model2 = DiffPOCEVAE(cfg.model, cfg.diffusion)
+    model2 = HybridModel(cfg.model, cfg.diffusion)
     model2.load_state_dict(torch.load(ckpt_path, map_location="cpu"))  # must not raise
