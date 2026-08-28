@@ -122,9 +122,9 @@ class _DiffusionBase(nn.Module):
 
             # If clipping is enabled, we compute a "clean" prediction of y and clip it to the
             # specified range. This is done to prevent extreme values in the reverse diffusion
-            # process, which can lead to instability or unrealistic predictions (see
-            # diffusion.ipynb). `alpha_bar_safe` is used to avoid division by zero in the case
-            # of very small alpha_bar values.
+            # process, which can lead to instability or unrealistic predictions (see notebooks)
+            # `alpha_bar_safe` is used to avoid division by zero in the case of very small
+            # alpha_bar values.
             if clip_val is not None:
                 alpha_bar_safe = alpha_bar.clamp(min=1e-15)
                 clean_pred: torch.Tensor = (

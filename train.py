@@ -88,35 +88,31 @@ def evaluate(
 
         with open(preds_csv_path, "w", newline="") as f:
             writer = csv.writer(f)
+
+            # fmt: off
             writer.writerow(
                 [
-                    "mu0",
-                    "mu1",
-                    "y0_mean",
-                    "y1_mean",
-                    "y0_std",
-                    "y1_std",
-                    "y0_lo95",
-                    "y0_hi95",
-                    "y1_lo95",
-                    "y1_hi95",
+                    "mu0", "mu1",
+                    "y0_mean", "y1_mean",
+                    "y0_std", "y1_std",
+                    "y0_lo95", "y0_hi95",
+                    "y1_lo95", "y1_hi95",
                 ]
             )
+            # fmt: on
+
             for i in range(y0.shape[0]):
+                # fmt: off
                 writer.writerow(
                     [
-                        mu0[i].item(),
-                        mu1[i].item(),
-                        y0[i].mean().item(),
-                        y1[i].mean().item(),
-                        y0[i].std().item(),
-                        y1[i].std().item(),
-                        lo0[i].item(),
-                        hi0[i].item(),
-                        lo1[i].item(),
-                        hi1[i].item(),
+                        mu0[i].item(), mu1[i].item(),
+                        y0[i].mean().item(), y1[i].mean().item(),
+                        y0[i].std().item(), y1[i].std().item(),
+                        lo0[i].item(), hi0[i].item(),
+                        lo1[i].item(), hi1[i].item(),
                     ]
                 )
+                # fmt: on
 
     cov0_95, cov1_95, w0_95, w1_95 = coverage(y0, y1, mu0, mu1, level=0.95)
     cov0_99, cov1_99, w0_99, w1_99 = coverage(y0, y1, mu0, mu1, level=0.99)
