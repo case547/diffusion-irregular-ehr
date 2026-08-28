@@ -1,35 +1,31 @@
 model:
-  feature_dim: 25       # IHDP has 25 covariates
-  latent_dim: 20        # dim(z); CEVAE paper default
-  hidden_dim: 64        # hidden layer width; proportionate to latent_dim=20 and ~550 training subjects
-  num_layers: 2         # depth of encoder/decoder MLPs
+  feature_dim: 25  # IHDP has 25 covariates
+  latent_dim: 20   # dim(z); CEVAE paper default
+  hidden_dim: 64   # hidden layer width; proportionate to latent_dim=20 and ~550 training subjects
+  num_layers: 2    # depth of encoder/decoder MLPs
 
 diffusion:
-  num_steps: 200        # L diffusion steps
+  num_steps: 200       # L diffusion steps
   beta_start: 0.0001
   beta_end: 0.1
-  schedule: quad        # quadratic; DiffPO default for tabular PO data
-  embedding_dim: 32     # sinusoidal time embedding dim; matched to block_dim to avoid 4x reduction in diffusion_projection
-  block_dim: 32         # I/O width of cond_proj, mapping_noise, and each ResidualBlock; proportionate to latent_dim=20 on IHDP (~985 subjects)
-  hidden_dim: 32        # output head width (output_projection1/2, y0/y1 layers); contracts like DiffPO (cond_dim -> hidden_dim)
-  num_blocks: 4         # number of residual blocks
+  schedule: quad       # quadratic; DiffPO default for tabular PO data
+  embedding_dim: 32    # sinusoidal time embedding dim; matched to block_dim to avoid 4x reduction in diffusion_projection
+  block_dim: 32        # I/O width of cond_proj, mapping_noise, and each ResidualBlock; proportionate to latent_dim=20 on IHDP (~985 subjects)
+  hidden_dim: 32       # output head width (output_projection1/2, y0/y1 layers); contracts like DiffPO (cond_dim -> hidden_dim)
+  num_blocks: 4        # number of residual blocks
   clip_denoised: True  # whether to clip denoised predictions during reverse diffusion
 
 train:
   epochs: 500
   batch_size: 256
-  lr: 0.0005              # DiffPO paper value
+  lr: 0.0005  # DiffPO paper value
   seed: 42
-  K: 50                   # PO samples at inference
-  use_final_model: true   # use final model for evaluation (vs best val ELBO)
-  early_stopping: false
-  patience: 20            # if early stopping, patience on total val ELBO
-  warmup_epochs: 50       # patience not armed until this epoch
+  K: 50       # PO samples at inference
   checkpoint_dir: checkpoints
 
 data:
   path: data/ihdp
-  replication: 1        # which IHDP NPCI replication(s) to use (1-indexed, 1-10 available)
-  train_ratio: 0.7      # 70% train
-  test_ratio: 0.15      # 15% test; val inferred as remaining (1 - train_ratio - test_ratio = 0.15)
+  replication: 1          # which IHDP NPCI replication(s) to use (1-indexed, 1-10 available)
+  train_ratio: 0.7        # 70% train
+  test_ratio: 0.15        # 15% test; val inferred as remaining (1 - train_ratio - test_ratio = 0.15)
   confounder_effect: 0.4  # momblack's direct outcome effect; largest value in Hill's own beta grid

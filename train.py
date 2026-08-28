@@ -145,13 +145,9 @@ def _train_loop(
     run_id: str,
     log_fn: Callable | None = None,
     propnet: PropensityNet | None = None,
-    use_final_model: bool = True,
-    early_stopping: bool = False,
 ) -> None:
     """MultiStepLR training with early stopping on total val ELBO.
 
-    Saves checkpoint whenever val ELBO improves; patience armed after warmup_epochs.
-    Loads best checkpoint into model before returning.
     log_fn:
         optional callable(log_dict: dict, step: int) -- called each epoch for wandb logging.
     """
@@ -160,10 +156,6 @@ def _train_loop(
     lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(
         optimizer, milestones=[p0, p1, p2, p3], gamma=0.1
     )
-
-    best_val_elbo = float("inf")
-    patience_left = cfg.train.patience
-    ckpt_path = Path(cfg.train.checkpoint_dir) / f"best_model_{run_id}.pth"
 
     for epoch in range(cfg.train.epochs):
         model.train()
@@ -176,7 +168,7 @@ def _train_loop(
             y = batch["y"].to(device)
             y_cf = batch["y_cf"].to(device)
             optimizer.zero_grad()
-            comps = model.compute_loss(x, a, y, y_cf, propnet=propnet)
+            comps = model.compute_loss(x, a, y, y_cf, propnet)
             loss = model.total_loss(comps)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -188,7 +180,7 @@ def _train_loop(
             n_batches += 1
 
         lr_scheduler.step()
-        val_comps = calculate_val_loss(model, val_loader, device, propnet=propnet)
+        val_comps = calculate_val_loss(model, val_loader, device, propnet)
 
         if log_fn is not None:
             log = {f"train/{k}": v / n_batches for k, v in epoch_losses.items()}
@@ -196,31 +188,12 @@ def _train_loop(
             log_fn(log, epoch + 1)
 
         val_loss = val_comps["total_loss"]
-        log_msg = (
+        logger.info(
             f"Epoch {epoch + 1}:"
             f" train_elbo {epoch_losses['total_loss'] / n_batches:.4f},"
             f" val_elbo {val_loss:.4f}"
         )
 
-        if val_loss < best_val_elbo:
-            best_val_elbo = val_loss
-            torch.save(model.state_dict(), ckpt_path)
-            if early_stopping and epoch >= cfg.train.warmup_epochs:
-                patience_left = cfg.train.patience
-            log_msg += " ✓ (saved)"
-        elif early_stopping and epoch >= cfg.train.warmup_epochs:
-            patience_left -= 1
-            log_msg += f" (patience {patience_left}/{cfg.train.patience})"
-            if patience_left == 0:
-                logger.info("Early stopping at epoch %d.", epoch + 1)
-                break
-
-        logger.info(log_msg)
-
     torch.save(
         model.state_dict(), Path(cfg.train.checkpoint_dir) / f"final_model_{run_id}.pth"
     )
-
-    if not use_final_model:
-        logger.info("Loading best model from checkpoint for evaluation.")
-        model.load_state_dict(torch.load(ckpt_path, map_location=device))

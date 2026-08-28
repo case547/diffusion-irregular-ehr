@@ -40,18 +40,7 @@ def run_condition(
     model = model_cls(cfg.model, cfg.diffusion).to(device)
     Path(cfg.train.checkpoint_dir).mkdir(parents=True, exist_ok=True)
 
-    _train_loop(
-        model,
-        train_loader,
-        val_loader,
-        cfg,
-        device,
-        run_id,
-        log_fn=log_fn,
-        propnet=propnet,
-        use_final_model=cfg.train.use_final_model,
-        early_stopping=cfg.train.early_stopping,
-    )
+    _train_loop(model, train_loader, val_loader, cfg, device, run_id, log_fn, propnet)
 
     if train_ds.y_cf is not None:
         y_both = _DiffusionBase._assemble_yboth(train_ds.a, train_ds.y, train_ds.y_cf)
