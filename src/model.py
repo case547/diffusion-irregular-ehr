@@ -13,7 +13,7 @@ from src.propensity import PropensityNet
 
 
 class _DiffusionBase(nn.Module):
-    """Shared noise schedule and DDPM helpers for DiffPOCEVAE and DiffPO."""
+    """Shared noise schedule and DDPM helpers for HybridModel and DiffPO."""
 
     denoiser: Denoiser
 
@@ -107,7 +107,7 @@ class _DiffusionBase(nn.Module):
         device: torch.device,
         clip_val: float | None = None,
     ) -> torch.Tensor:
-        """DDPM reverse loop. cond is z (DiffPOCEVAE) or x_rep (DiffPO). Returns (BK,2)."""
+        """DDPM reverse loop. cond is z (HybridModel) or x_rep (DiffPO). Returns (BK,2)."""
         y = torch.randn(BK, 2, device=device)
 
         for step in range(self.L - 1, -1, -1):
@@ -148,7 +148,7 @@ class _DiffusionBase(nn.Module):
         return y
 
 
-class DiffPOCEVAE(_DiffusionBase):
+class HybridModel(_DiffusionBase):
     """
     DiffPO-CEVAE: diffusion potential outcome model with latent hidden confounder.
 
@@ -234,7 +234,7 @@ class DiffPO(_DiffusionBase):
     """
     DiffPO baseline: diffusion PO model conditioned directly on x.
 
-    Reimplemented using our stack for a fair comparison with DiffPOCEVAE.
+    Reimplemented using our stack for a fair comparison with HybridModel.
     Conditioning: [a, x] via Denoiser(latent_dim=feature_dim).
     Optional IPW weighting via a pre-trained frozen PropensityNet.
     """
