@@ -19,6 +19,9 @@ class DiffusionConfig(BaseModel):
     num_blocks: int
     clip_denoised: bool = False
     use_propnet: bool = False
+    consistency_weight: float = 0.0
+    consistency_warmup_frac: float = 0.5
+    consistency_min_tau_frac: float = 0.5
 
 
 class TrainConfig(BaseModel):

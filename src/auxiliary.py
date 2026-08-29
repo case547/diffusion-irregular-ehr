@@ -54,3 +54,12 @@ class AuxOutcome(nn.Module):
         """(B,)"""
         loc, scale = self._params(x, a)
         return Normal(loc, scale).sample()
+
+    def mean(self, x: torch.Tensor, a: torch.Tensor) -> torch.Tensor:
+        """Posterior mean; no sampling noise.
+
+        Use over `sample` when a stable point estimate is wanted rather
+        than a stochastic draw. Shape (B,).
+        """
+        loc, _ = self._params(x, a)
+        return loc

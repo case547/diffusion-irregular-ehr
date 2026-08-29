@@ -25,6 +25,7 @@ class _DiffusionBase(nn.Module, ABC):
         y_fac: torch.Tensor,
         y_cf: torch.Tensor,
         propnet: PropensityNet | None = None,
+        epoch_frac: float = 0.0,
     ) -> dict[str, torch.Tensor]: ...
 
     @abstractmethod
@@ -212,6 +213,9 @@ class HybridModel(_DiffusionBase):
             num_steps=diffusion_cfg.num_steps,
         )
         self._init_schedule(diffusion_cfg)
+        self._consistency_weight = diffusion_cfg.consistency_weight
+        self._consistency_warmup_frac = diffusion_cfg.consistency_warmup_frac
+        self._consistency_min_tau_frac = diffusion_cfg.consistency_min_tau_frac
 
     def compute_loss(
         self,
@@ -220,6 +224,7 @@ class HybridModel(_DiffusionBase):
         y_fac: torch.Tensor,
         y_cf: torch.Tensor,
         propnet: PropensityNet | None = None,
+        epoch_frac: float = 0.0,
     ) -> dict[str, torch.Tensor]:
         # Encode -- reparameterised; z retains grad for full end-to-end training
         z, mu, sigma = self.encoder.rsample(x, a, y_fac)
@@ -239,7 +244,7 @@ class HybridModel(_DiffusionBase):
 
         log_ry = self.aux_outcome.log_prob(x, a, y_fac).mean()
 
-        return {
+        out = {
             "log_px": log_px,
             "log_pa": log_pa,
             "kl": kl,
@@ -247,15 +252,51 @@ class HybridModel(_DiffusionBase):
             "log_ry": log_ry,
         }
 
+        if self._consistency_weight > 0.0:
+            # Pseudo-target for each subject's *counterfactual* arm, from the separately
+            # trained aux_outcome regressor -- leak-free (aux_outcome only ever trains on
+            # factual (x,a,y) triples). Detached: gradient must reach only the denoiser,
+            # never aux_outcome (which is trained solely via its own log_ry term above).
+            with torch.no_grad():
+                y_pseudo_cf = self.aux_outcome.mean(x, 1.0 - a)
+
+            # Place the pseudo value in whichever slot is counterfactual per subject
+            pseudo_y_both = torch.stack([y_pseudo_cf * a, y_pseudo_cf * (1.0 - a)], dim=1)
+            cf_mask = 1.0 - factual_mask
+
+            # eps-space form: avoids dividing by sqrt(alpha_bar), equivalent to matching
+            # the clean-data estimate to y_pseudo, but with no division by sqrt(alpha_bar)
+            ab_tau = self.alpha_bar_sched[tau].unsqueeze(1)
+            eps_target = (noisy_y - ab_tau.sqrt() * pseudo_y_both) / (
+                1.0 - ab_tau
+            ).sqrt().clamp(min=1e-6)
+            cf_sq_err = (((eps_pred - eps_target) * cf_mask) ** 2).sum(dim=1)
+
+            # Exclude low tau: ill-conditioned here (small divisor above), and where the
+            # clean-data estimate would mostly leak the true (unobservable) y_cf baked
+            # into noisy_y by _noise_targets, rather than test against y_pseudo.
+            min_tau = int(self._consistency_min_tau_frac * self.L)
+            tau_mask = (tau >= min_tau).float()
+
+            consistency_raw = (cf_sq_err * tau_mask).sum() / tau_mask.sum().clamp(min=1.0)
+            ramp = min(1.0, epoch_frac / max(self._consistency_warmup_frac, 1e-8))
+            out["consistency_loss"] = (self._consistency_weight * ramp) * consistency_raw
+            out["consistency_raw"] = consistency_raw.detach()
+
+        return out
+
     def total_loss(self, components: dict[str, torch.Tensor]) -> torch.Tensor:
         """Minimise -F."""
-        return (
+        loss = (
             -components["log_px"]
             - components["log_pa"]
             + components["kl"]
             + components["diffusion_loss"]
             - components["log_ry"]
         )
+        if "consistency_loss" in components:
+            loss = loss + components["consistency_loss"]
+        return loss
 
     @torch.no_grad()
     def sample_outcomes(
@@ -301,6 +342,7 @@ class DiffPO(_DiffusionBase):
         y_fac: torch.Tensor,
         y_cf: torch.Tensor,
         propnet: PropensityNet | None = None,
+        epoch_frac: float = 0.0,
     ) -> dict[str, torch.Tensor]:
         noisy_y, tau, eps, factual_mask = self._noise_targets(
             x.shape[0], x.device, a, y_fac, y_cf
