@@ -184,7 +184,9 @@ def _train_loop(
             n_batches += 1
 
         lr_scheduler.step()
-        val_comps = calculate_val_loss(model, val_loader, device, propnet, epoch_frac, pop_means)
+        val_comps = calculate_val_loss(
+            model, val_loader, device, propnet, epoch_frac, pop_means
+        )
 
         if log_fn is not None:
             log = {f"train/{k}": v / n_batches for k, v in epoch_losses.items()}
