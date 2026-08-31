@@ -236,7 +236,13 @@ class HybridModel(_DiffusionBase):
         log_pa = self.a_decoder.log_prob(z, a).mean()
         kl = 0.5 * (mu.pow(2) + sigma.pow(2) - 2.0 * sigma.log() - 1.0).sum(-1).mean()
 
-        if self._cf_anchor_weight > 0.0 and pop_means is not None:
+        # Gate both the cf_target substitution and the soft mask on the SAME condition --
+        # anchoring the input without softening the mask (or vice versa) is a broken partial
+        # state that matches neither "off" nor "on" (caught via real end-to-end smoke test,
+        # not a unit test: unit tests always pass pop_means together with cf_anchor_weight).
+        anchor_active = self._cf_anchor_weight > 0.0 and pop_means is not None
+
+        if anchor_active:
             # Leak-free anchor: replace the true (in-practice-unobservable) y_cf with the
             # opposite arm's population mean from the training split, for the counterfactual
             # slot's *noised input* -- see
@@ -251,7 +257,7 @@ class HybridModel(_DiffusionBase):
         )
         eps_pred: torch.Tensor = self.denoiser(noisy_y, tau, z, a)
 
-        if self._cf_anchor_weight > 0.0:
+        if anchor_active:
             soft_mask = factual_mask + self._cf_anchor_weight * (1.0 - factual_mask)
         else:
             soft_mask = factual_mask
