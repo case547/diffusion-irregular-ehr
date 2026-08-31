@@ -28,6 +28,7 @@ def run_condition(
     test_ds: CausalDataset,
     model_cls: type[_DiffusionBase] = HybridModel,
     propnet: PropensityNet | None = None,
+    pop_means: tuple[float, float] | None = None,
     log_fn: Callable | None = None,
 ) -> tuple[dict[str, float], dict[str, float]]:
     """Train one model on one dataset condition and return test metrics."""
@@ -40,7 +41,7 @@ def run_condition(
     model = model_cls(cfg.model, cfg.diffusion).to(device)
     Path(cfg.train.checkpoint_dir).mkdir(parents=True, exist_ok=True)
 
-    _train_loop(model, train_loader, val_loader, cfg, device, run_id, log_fn, propnet)
+    _train_loop(model, train_loader, val_loader, cfg, device, run_id, log_fn, propnet, pop_means)
 
     if train_ds.y_cf is not None:
         y_both = _DiffusionBase._assemble_yboth(train_ds.a, train_ds.y, train_ds.y_cf)
@@ -92,6 +93,13 @@ def _fit_propnet(
     for p in propnet.parameters():
         p.requires_grad_(False)
     return propnet
+
+
+def _compute_population_means(train_ds: CausalDataset) -> tuple[float, float]:
+    """Per-arm mean factual outcome (normalised space) from the training split -- a leak-free
+    anchor for HybridModel's counterfactual slot (see DiffusionConfig.cf_anchor_weight)."""
+    a0, a1 = train_ds.a == 0, train_ds.a == 1
+    return train_ds.y[a0].mean().item(), train_ds.y[a1].mean().item()
 
 
 CONDITION_MAP: dict[str, tuple[type[_DiffusionBase], bool]] = {
@@ -176,6 +184,10 @@ if __name__ == "__main__":
                     log_fn=lambda d, step: run.log({**d, "propnet/step": step}),
                 )
 
+            pop_means = None
+            if model_cls is HybridModel and cfg.diffusion.cf_anchor_weight > 0.0:
+                pop_means = _compute_population_means(train_ds)
+
             result_val, result_test = run_condition(
                 run_id,
                 rep_cfg,
@@ -184,6 +196,7 @@ if __name__ == "__main__":
                 test_ds,
                 model_cls,
                 propnet,
+                pop_means,
                 log_fn=lambda d, step: run.log({**d, "train/step": step}),
             )
 
