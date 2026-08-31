@@ -94,7 +94,7 @@ def _fit_propnet(
     return propnet
 
 
-CONDITION_MAP = {
+CONDITION_MAP: dict[str, tuple[type[_DiffusionBase], bool]] = {
     "naive_full": (DiffPO, False),
     "naive_conf": (DiffPO, True),
     "hybrid_full": (HybridModel, False),
@@ -167,7 +167,7 @@ if __name__ == "__main__":
             run.define_metric("val/*", step_metric="train/step")
 
             propnet = None
-            if model_cls is DiffPO:
+            if model_cls is DiffPO or cfg.diffusion.use_propnet:
                 propnet = _fit_propnet(
                     rep_cfg,
                     train_ds,
