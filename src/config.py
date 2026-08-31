@@ -22,6 +22,8 @@ class DiffusionConfig(BaseModel):
     consistency_weight: float = 0.0
     consistency_warmup_frac: float = 0.5
     consistency_min_tau_frac: float = 0.5
+    cf_anchor_weight: float = 0.0  # soft-mask weight for the counterfactual slot, anchored to
+                                    # per-arm population means (0 = off, today's hard factual_mask)
 
 
 class TrainConfig(BaseModel):
