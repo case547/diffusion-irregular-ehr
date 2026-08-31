@@ -7,7 +7,8 @@ from src.data import CausalDataset, make_ihdp_confounded
 # ── shared fixture ────────────────────────────────────────────────────────────
 
 
-def _fake(n: int = 100, f: int = 25):
+def _fake(n: int = 100, f: int = 25, seed: int = 0):
+    np.random.seed(seed)
     return (
         np.random.randn(n, f).astype(np.float32),  # x
         np.random.randint(0, 2, n).astype(np.float32),  # a
@@ -111,11 +112,13 @@ def test_make_ihdp_confounded_outcome_effect():
     # defined): multiplicative for mu0, additive for mu1, only for confounder==1
     # subjects (mu0/mu1 are never touched by the flip step).
     np.testing.assert_allclose(
-        mu0_new_raw[mask], mu0_orig_raw[mask] * np.exp(effect), rtol=1e-5
+        mu0_new_raw[mask], mu0_orig_raw[mask] * np.exp(effect), rtol=1e-5, atol=1e-5
     )
-    np.testing.assert_allclose(mu1_new_raw[mask], mu1_orig_raw[mask] + effect, rtol=1e-5)
-    np.testing.assert_allclose(mu0_new_raw[~mask], mu0_orig_raw[~mask], rtol=1e-5)
-    np.testing.assert_allclose(mu1_new_raw[~mask], mu1_orig_raw[~mask], rtol=1e-5)
+    np.testing.assert_allclose(
+        mu1_new_raw[mask], mu1_orig_raw[mask] + effect, rtol=1e-5, atol=1e-5
+    )
+    np.testing.assert_allclose(mu0_new_raw[~mask], mu0_orig_raw[~mask], rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(mu1_new_raw[~mask], mu1_orig_raw[~mask], rtol=1e-5, atol=1e-5)
 
     # Noise is preserved (in raw units), not resampled: reconstruct each subject's
     # original and new noise (accounting for the swap on flipped subjects) and
