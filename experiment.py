@@ -1,4 +1,4 @@
-"""2×2 confounding experiment: DiffPO and DiffPO-CEVAE × full and confounded IHDP."""
+"""2x2 confounding experiment: DiffPO and HybridModel x full and confounded IHDP."""
 
 import json
 import logging
