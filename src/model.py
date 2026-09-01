@@ -364,6 +364,7 @@ class DiffPO(_DiffusionBase):
             num_steps=diffusion_cfg.num_steps,
         )
         self._init_schedule(diffusion_cfg)
+        self._cf_anchor_weight = diffusion_cfg.cf_anchor_weight
 
     def compute_loss(
         self,
@@ -375,12 +376,20 @@ class DiffPO(_DiffusionBase):
         epoch_frac: float = 0.0,
         pop_means: tuple[float, float] | None = None,
     ) -> dict[str, torch.Tensor]:
+        cf_target, anchor_active = self._apply_cf_anchor(a, y_cf, pop_means)
+
         noisy_y, tau, eps, factual_mask = self._noise_targets(
-            x.shape[0], x.device, a, y_fac, y_cf
+            x.shape[0], x.device, a, y_fac, cf_target
         )
         eps_pred: torch.Tensor = self.denoiser(noisy_y, tau, x, a)
+
+        if anchor_active:
+            gradient_mask = factual_mask + self._cf_anchor_weight * (1.0 - factual_mask)
+        else:
+            gradient_mask = factual_mask
+
         diffusion_loss = self.calculate_diffusion_loss(
-            eps, eps_pred, factual_mask, x, a, propnet
+            eps, eps_pred, gradient_mask, x, a, propnet
         )
         return {"diffusion_loss": diffusion_loss}
 

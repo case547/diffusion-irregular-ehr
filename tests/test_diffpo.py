@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from src.config import DiffusionConfig, ModelConfig
@@ -40,6 +41,73 @@ def test_loss_with_propnet():
     )
     x, a, y, y_cf = _batch()
     comps = model.compute_loss(x, a, y, y_cf, propnet=propnet)
+    assert torch.isfinite(comps["diffusion_loss"])
+
+
+def test_cf_anchor_inert_by_default():
+    model = DiffPO(MODEL_CFG, DIFF_CFG)
+    x, a, y_fac, y_cf = _batch()
+    torch.manual_seed(0)
+    comps_anchored = model.compute_loss(x, a, y_fac, y_cf, pop_means=(3.0, -2.0))
+    torch.manual_seed(0)
+    comps_plain = model.compute_loss(x, a, y_fac, y_cf)
+    assert comps_anchored["diffusion_loss"].item() == pytest.approx(
+        comps_plain["diffusion_loss"].item()
+    )
+
+
+def test_cf_anchor_uses_population_mean_not_y_cf():
+    """Spy on the real _noise_targets call inside compute_loss -- directly verifies what
+    cf_target compute_loss actually constructed, matching tests/test_model.py's convention
+    for the same check on HybridModel."""
+    cfg = DiffusionConfig(
+        num_steps=10,
+        beta_start=0.0001,
+        beta_end=0.02,
+        schedule="quad",
+        embedding_dim=16,
+        block_dim=16,
+        hidden_dim=32,
+        num_blocks=2,
+        cf_anchor_weight=0.1,
+    )
+    model = DiffPO(MODEL_CFG, cfg)
+    x = torch.randn(B, F)
+    a = torch.tensor([0.0, 1.0, 0.0, 1.0])
+    y_fac = torch.randn(B)
+    y_cf = torch.full((B,), 999.0)  # deliberately extreme -- must NOT reach _noise_targets
+    pm0, pm1 = 3.0, -2.0
+
+    captured = {}
+    original = model._noise_targets
+
+    def spy(batch_size, device, a_arg, y_fac_arg, y_cf_arg):
+        captured["y_cf_arg"] = y_cf_arg
+        return original(batch_size, device, a_arg, y_fac_arg, y_cf_arg)
+
+    model._noise_targets = spy
+    model.compute_loss(x, a, y_fac, y_cf, pop_means=(pm0, pm1))
+
+    expected_cf_target = torch.where(a == 1, torch.full_like(a, pm0), torch.full_like(a, pm1))
+    assert torch.allclose(captured["y_cf_arg"], expected_cf_target)
+    assert not torch.allclose(captured["y_cf_arg"], y_cf)
+
+
+def test_cf_anchor_finite_loss():
+    cfg = DiffusionConfig(
+        num_steps=10,
+        beta_start=0.0001,
+        beta_end=0.02,
+        schedule="quad",
+        embedding_dim=16,
+        block_dim=16,
+        hidden_dim=32,
+        num_blocks=2,
+        cf_anchor_weight=0.1,
+    )
+    model = DiffPO(MODEL_CFG, cfg)
+    x, a, y_fac, y_cf = _batch()
+    comps = model.compute_loss(x, a, y_fac, y_cf, pop_means=(3.0, -2.0))
     assert torch.isfinite(comps["diffusion_loss"])
 
 

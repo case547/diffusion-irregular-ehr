@@ -209,3 +209,20 @@ def test_cf_anchor_finite_loss():
     x, a, y_fac, y_cf = _batch()
     comps = model.compute_loss(x, a, y_fac, y_cf, pop_means=(3.0, -2.0))
     assert torch.isfinite(comps["diffusion_loss"])
+
+
+def test_apply_cf_anchor_truth_table():
+    cfg = _anchor_cfg(cf_anchor_weight=0.1)
+    model_on = HybridModel(MODEL_CFG, cfg)
+    model_off = HybridModel(MODEL_CFG, DIFF_CFG)  # cf_anchor_weight defaults to 0.0
+    a = torch.tensor([0.0, 1.0])
+    y_cf = torch.tensor([5.0, 6.0])
+
+    _, active = model_on._apply_cf_anchor(a, y_cf, pop_means=(1.0, 2.0))
+    assert active is True
+
+    _, active = model_on._apply_cf_anchor(a, y_cf, pop_means=None)
+    assert active is False
+
+    _, active = model_off._apply_cf_anchor(a, y_cf, pop_means=(1.0, 2.0))
+    assert active is False
