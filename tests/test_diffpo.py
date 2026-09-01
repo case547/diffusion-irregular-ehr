@@ -111,6 +111,40 @@ def test_cf_anchor_finite_loss():
     assert torch.isfinite(comps["diffusion_loss"])
 
 
+def test_cf_anchor_softens_gradient_mask_in_compute_loss():
+    """Spy on the real calculate_diffusion_loss call inside compute_loss -- verifies the
+    ACTUAL mask tensor reaching it, not just a standalone recomputation of the formula
+    (mirrors tests/test_model.py's equivalent check on HybridModel)."""
+    cfg = DiffusionConfig(
+        num_steps=10,
+        beta_start=0.0001,
+        beta_end=0.02,
+        schedule="quad",
+        embedding_dim=16,
+        block_dim=16,
+        hidden_dim=32,
+        num_blocks=2,
+        cf_anchor_weight=0.15,
+    )
+    model = DiffPO(MODEL_CFG, cfg)
+    x, a, y_fac, y_cf = _batch()
+    a = torch.tensor([0.0, 1.0, 0.0, 1.0])
+
+    captured = {}
+    original = model.calculate_diffusion_loss
+
+    def spy(eps, eps_pred, gradient_mask, x_arg, a_arg, propnet):
+        captured["gradient_mask"] = gradient_mask
+        return original(eps, eps_pred, gradient_mask, x_arg, a_arg, propnet)
+
+    model.calculate_diffusion_loss = spy
+    model.compute_loss(x, a, y_fac, y_cf, pop_means=(3.0, -2.0))
+
+    factual_mask = torch.stack([1 - a, a], dim=1)
+    expected = factual_mask + 0.15 * (1.0 - factual_mask)
+    assert torch.allclose(captured["gradient_mask"], expected)
+
+
 def test_backward():
     model = DiffPO(MODEL_CFG, DIFF_CFG)
     model.total_loss(model.compute_loss(*_batch())).backward()

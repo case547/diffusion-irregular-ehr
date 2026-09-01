@@ -100,7 +100,7 @@ def _fit_propnet(
 def _compute_population_means(train_ds: CausalDataset) -> tuple[float, float]:
     """Per-arm mean factual outcome (normalised space) from the training split.
 
-    This gives a leak-free anchor for HybridModel's counterfactual slot
+    This gives a leak-free anchor for HybridModel's and/or DiffPO's counterfactual slot
     (see DiffusionConfig.cf_anchor_weight).
     """
     a0_idx = train_ds.a == 0

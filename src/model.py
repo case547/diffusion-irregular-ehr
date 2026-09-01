@@ -16,6 +16,7 @@ class _DiffusionBase(nn.Module, ABC):
     """Shared noise schedule and DDPM helpers for HybridModel and DiffPO."""
 
     denoiser: Denoiser
+    _cf_anchor_weight: float = 0.0
 
     @abstractmethod
     def compute_loss(
