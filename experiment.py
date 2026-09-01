@@ -191,7 +191,7 @@ if __name__ == "__main__":
                 )
 
             pop_means = None
-            if model_cls is HybridModel and cfg.diffusion.cf_anchor_weight > 0.0:
+            if cfg.diffusion.cf_anchor_weight > 0.0:
                 pop_means = _compute_population_means(train_ds)
                 logger.info(
                     "Population means (normalised space) for counterfactual slot anchoring: "
