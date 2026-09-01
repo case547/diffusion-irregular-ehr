@@ -98,10 +98,14 @@ def _fit_propnet(
 
 
 def _compute_population_means(train_ds: CausalDataset) -> tuple[float, float]:
-    """Per-arm mean factual outcome (normalised space) from the training split -- a leak-free
-    anchor for HybridModel's counterfactual slot (see DiffusionConfig.cf_anchor_weight)."""
-    a0, a1 = train_ds.a == 0, train_ds.a == 1
-    return train_ds.y[a0].mean().item(), train_ds.y[a1].mean().item()
+    """Per-arm mean factual outcome (normalised space) from the training split.
+
+    This gives a leak-free anchor for HybridModel's counterfactual slot
+    (see DiffusionConfig.cf_anchor_weight).
+    """
+    a0_idx = train_ds.a == 0
+    a1_idx = train_ds.a == 1
+    return train_ds.y[a0_idx].mean().item(), train_ds.y[a1_idx].mean().item()
 
 
 CONDITION_MAP: dict[str, tuple[type[_DiffusionBase], bool]] = {
@@ -189,6 +193,12 @@ if __name__ == "__main__":
             pop_means = None
             if model_cls is HybridModel and cfg.diffusion.cf_anchor_weight > 0.0:
                 pop_means = _compute_population_means(train_ds)
+                logger.info(
+                    "Population means (normalised space) for counterfactual slot anchoring: "
+                    "Y(0) = %.4f, Y(1) = %.4f",
+                    pop_means[0],
+                    pop_means[1],
+                )
 
             result_val, result_test = run_condition(
                 run_id,

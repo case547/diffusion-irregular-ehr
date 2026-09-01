@@ -110,7 +110,7 @@ class _DiffusionBase(nn.Module, ABC):
         self,
         eps: torch.Tensor,
         eps_pred: torch.Tensor,
-        factual_mask: torch.Tensor,
+        gradient_mask: torch.Tensor,
         x: torch.Tensor | None = None,
         a: torch.Tensor | None = None,
         propnet: PropensityNet | None = None,
@@ -119,7 +119,7 @@ class _DiffusionBase(nn.Module, ABC):
 
         Optionally weighted by IPW if a PropensityNet is provided. Returns a scalar loss value.
         """
-        per_sample = (((eps_pred - eps) * factual_mask) ** 2).sum(dim=1)
+        per_sample = (((eps_pred - eps) * gradient_mask) ** 2).sum(dim=1)
 
         if propnet is not None:
             if x is None or a is None:
@@ -236,19 +236,14 @@ class HybridModel(_DiffusionBase):
         log_pa = self.a_decoder.log_prob(z, a).mean()
         kl = 0.5 * (mu.pow(2) + sigma.pow(2) - 2.0 * sigma.log() - 1.0).sum(-1).mean()
 
-        # Gate both the cf_target substitution and the soft mask on the SAME condition --
-        # anchoring the input without softening the mask (or vice versa) is a broken partial
-        # state that matches neither "off" nor "on" (caught via real end-to-end smoke test,
-        # not a unit test: unit tests always pass pop_means together with cf_anchor_weight).
         anchor_active = self._cf_anchor_weight > 0.0 and pop_means is not None
 
         if anchor_active:
-            # Leak-free anchor: replace the true (in-practice-unobservable) y_cf with the
-            # opposite arm's population mean from the training split, for the counterfactual
-            # slot's *noised input* -- see
-            # docs/superpowers/specs/2026-08-31-cf-population-mean-anchor-design.md
-            pm0, pm1 = pop_means
-            cf_target = torch.where(a == 1, torch.full_like(a, pm0), torch.full_like(a, pm1))
+            # Leak-free anchor: replace true y_cf with opposite arm's population mean
+            popmean_0, popmean_1 = pop_means
+            cf_target = torch.where(
+                a == 1, torch.full_like(a, popmean_0), torch.full_like(a, popmean_1)
+            )
         else:
             cf_target = y_cf
 
@@ -258,12 +253,12 @@ class HybridModel(_DiffusionBase):
         eps_pred: torch.Tensor = self.denoiser(noisy_y, tau, z, a)
 
         if anchor_active:
-            soft_mask = factual_mask + self._cf_anchor_weight * (1.0 - factual_mask)
+            gradient_mask = factual_mask + self._cf_anchor_weight * (1.0 - factual_mask)
         else:
-            soft_mask = factual_mask
+            gradient_mask = factual_mask
 
         diffusion_loss = self.calculate_diffusion_loss(
-            eps, eps_pred, soft_mask, x, a, propnet
+            eps, eps_pred, gradient_mask, x, a, propnet
         )
 
         log_ry = self.aux_outcome.log_prob(x, a, y_fac).mean()

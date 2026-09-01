@@ -14,10 +14,11 @@ diffusion:
   hidden_dim: 32       # output head width (output_projection1/2, y0/y1 layers); contracts like DiffPO (cond_dim -> hidden_dim)
   num_blocks: 4        # number of residual blocks
   clip_denoised: True  # whether to clip denoised predictions during reverse diffusion
-  use_propnet: False   # whether to use PropensityNet to weight HybridModel's diffusion loss
-  consistency_weight: 0.5        # auxiliary counterfactual consistency loss weight (0=off)
-  consistency_warmup_frac: 0.25   # frac of training over which weight ramps up
+  use_propnet: True   # whether to use PropensityNet to weight HybridModel's diffusion loss
+  consistency_weight: 0        # auxiliary counterfactual consistency loss weight (0=off)
+  consistency_warmup_frac: 0.25  # frac of training over which weight ramps up
   consistency_min_tau_frac: 0.5  # exclude tau < frac*L (ill-conditioned + leaky)
+  cf_anchor_weight: 1.0          # soft-mask weight for the counterfactual slot, anchored to per-arm population means
 
 train:
   epochs: 500
