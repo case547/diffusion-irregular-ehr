@@ -203,9 +203,51 @@ def test_cf_anchor_soft_mask_weight():
     assert torch.allclose(soft_mask, expected)
 
 
+def test_cf_anchor_softens_gradient_mask_in_compute_loss():
+    """Spy on the real calculate_diffusion_loss call inside compute_loss -- verifies the
+    ACTUAL mask tensor reaching it, not just a standalone recomputation of the formula
+    (which test_cf_anchor_soft_mask_weight does and would pass even if compute_loss
+    mistakenly passed the unmodified factual_mask)."""
+    cfg = _anchor_cfg(cf_anchor_weight=0.15)
+    model = HybridModel(MODEL_CFG, cfg)
+    x, a, y_fac, y_cf = _batch()
+    a = torch.tensor([0.0, 1.0, 0.0, 1.0])
+
+    captured = {}
+    original = model.calculate_diffusion_loss
+
+    def spy(eps, eps_pred, gradient_mask, x_arg, a_arg, propnet):
+        captured["gradient_mask"] = gradient_mask
+        return original(eps, eps_pred, gradient_mask, x_arg, a_arg, propnet)
+
+    model.calculate_diffusion_loss = spy
+    model.compute_loss(x, a, y_fac, y_cf, pop_means=(3.0, -2.0))
+
+    factual_mask = torch.stack([1 - a, a], dim=1)
+    expected = factual_mask + 0.15 * (1.0 - factual_mask)
+    assert torch.allclose(captured["gradient_mask"], expected)
+
+
 def test_cf_anchor_finite_loss():
     cfg = _anchor_cfg(cf_anchor_weight=0.1)
     model = HybridModel(MODEL_CFG, cfg)
     x, a, y_fac, y_cf = _batch()
     comps = model.compute_loss(x, a, y_fac, y_cf, pop_means=(3.0, -2.0))
     assert torch.isfinite(comps["diffusion_loss"])
+
+
+def test_apply_cf_anchor_truth_table():
+    cfg = _anchor_cfg(cf_anchor_weight=0.1)
+    model_on = HybridModel(MODEL_CFG, cfg)
+    model_off = HybridModel(MODEL_CFG, DIFF_CFG)  # cf_anchor_weight defaults to 0.0
+    a = torch.tensor([0.0, 1.0])
+    y_cf = torch.tensor([5.0, 6.0])
+
+    _, active = model_on._apply_cf_anchor(a, y_cf, pop_means=(1.0, 2.0))
+    assert active is True
+
+    _, active = model_on._apply_cf_anchor(a, y_cf, pop_means=None)
+    assert active is False
+
+    _, active = model_off._apply_cf_anchor(a, y_cf, pop_means=(1.0, 2.0))
+    assert active is False

@@ -16,6 +16,7 @@ class _DiffusionBase(nn.Module, ABC):
     """Shared noise schedule and DDPM helpers for HybridModel and DiffPO."""
 
     denoiser: Denoiser
+    _cf_anchor_weight: float = 0.0
 
     @abstractmethod
     def compute_loss(
@@ -135,6 +136,26 @@ class _DiffusionBase(nn.Module, ABC):
         else:
             return per_sample.mean()
 
+    def _apply_cf_anchor(
+        self, a: torch.Tensor, y_cf: torch.Tensor, pop_means: tuple[float, float] | None
+    ) -> tuple[torch.Tensor, bool]:
+        """Leak-free counterfactual-slot substitution, shared by HybridModel and DiffPO.
+
+        Returns `(cf_target, anchor_active)`.
+
+        `cf_target` replaces `y_cf` as the input to `_noise_targets` when the anchor is
+        active; `anchor_active` is the single source of truth the caller must reuse when
+        deciding whether to also soften factual_mask once `_noise_targets` returns it.
+        """
+        anchor_active = self._cf_anchor_weight > 0.0 and pop_means is not None
+        if not anchor_active:
+            return y_cf, False
+
+        pm0, pm1 = pop_means
+        # For a=1 subjects: y_fac=Y(1), y_cf=Y(0) -> anchor Y(0) to pm0 (and vice versa)
+        cf_target = torch.where(a == 1, torch.full_like(a, pm0), torch.full_like(a, pm1))
+        return cf_target, True
+
     def _ddpm_reverse(
         self,
         BK: int,
@@ -236,16 +257,7 @@ class HybridModel(_DiffusionBase):
         log_pa = self.a_decoder.log_prob(z, a).mean()
         kl = 0.5 * (mu.pow(2) + sigma.pow(2) - 2.0 * sigma.log() - 1.0).sum(-1).mean()
 
-        anchor_active = self._cf_anchor_weight > 0.0 and pop_means is not None
-
-        if anchor_active:
-            # Leak-free anchor: replace true y_cf with opposite arm's population mean
-            popmean_0, popmean_1 = pop_means
-            cf_target = torch.where(
-                a == 1, torch.full_like(a, popmean_0), torch.full_like(a, popmean_1)
-            )
-        else:
-            cf_target = y_cf
+        cf_target, anchor_active = self._apply_cf_anchor(a, y_cf, pop_means)
 
         noisy_y, tau, eps, factual_mask = self._noise_targets(
             x.shape[0], x.device, a, y_fac, cf_target
@@ -353,6 +365,7 @@ class DiffPO(_DiffusionBase):
             num_steps=diffusion_cfg.num_steps,
         )
         self._init_schedule(diffusion_cfg)
+        self._cf_anchor_weight = diffusion_cfg.cf_anchor_weight
 
     def compute_loss(
         self,
@@ -364,12 +377,20 @@ class DiffPO(_DiffusionBase):
         epoch_frac: float = 0.0,
         pop_means: tuple[float, float] | None = None,
     ) -> dict[str, torch.Tensor]:
+        cf_target, anchor_active = self._apply_cf_anchor(a, y_cf, pop_means)
+
         noisy_y, tau, eps, factual_mask = self._noise_targets(
-            x.shape[0], x.device, a, y_fac, y_cf
+            x.shape[0], x.device, a, y_fac, cf_target
         )
         eps_pred: torch.Tensor = self.denoiser(noisy_y, tau, x, a)
+
+        if anchor_active:
+            gradient_mask = factual_mask + self._cf_anchor_weight * (1.0 - factual_mask)
+        else:
+            gradient_mask = factual_mask
+
         diffusion_loss = self.calculate_diffusion_loss(
-            eps, eps_pred, factual_mask, x, a, propnet
+            eps, eps_pred, gradient_mask, x, a, propnet
         )
         return {"diffusion_loss": diffusion_loss}
 
