@@ -115,24 +115,24 @@ def evaluate(
                 )
                 # fmt: on
 
-    cov0_95, cov1_95, w0_95, w1_95 = coverage(y0, y1, mu0, mu1, level=0.95)
-    cov0_99, cov1_99, w0_99, w1_99 = coverage(y0, y1, mu0, mu1, level=0.99)
-    r0, r1 = rmse(y0, y1, mu0, mu1)
-    wd0, wd1 = wasserstein(y0, y1, mu0, mu1, sigma=sigma)
+    cov_95_y0, cov_95_y1, width_95_y0, width_95_y1 = coverage(y0, y1, mu0, mu1, level=0.95)
+    cov_99_y0, cov_99_y1, width_99_y0, width_99_y1 = coverage(y0, y1, mu0, mu1, level=0.99)
+    rmse_y0, rmse_y1 = rmse(y0, y1, mu0, mu1)
+    wass_y0, wass_y1 = wasserstein(y0, y1, mu0, mu1, sigma=sigma)
 
     return {
-        "wasserstein_y0": wd0,
-        "wasserstein_y1": wd1,
-        "coverage_95_y0": cov0_95,
-        "coverage_95_y1": cov1_95,
-        "width_95_y0": w0_95,
-        "width_95_y1": w1_95,
-        "coverage_99_y0": cov0_99,
-        "coverage_99_y1": cov1_99,
-        "width_99_y0": w0_99,
-        "width_99_y1": w1_99,
-        "rmse_y0": r0,
-        "rmse_y1": r1,
+        "wasserstein_y0": wass_y0,
+        "wasserstein_y1": wass_y1,
+        "coverage_95_y0": cov_95_y0,
+        "coverage_95_y1": cov_95_y1,
+        "width_95_y0": width_95_y0,
+        "width_95_y1": width_95_y1,
+        "coverage_99_y0": cov_99_y0,
+        "coverage_99_y1": cov_99_y1,
+        "width_99_y0": width_99_y0,
+        "width_99_y1": width_99_y1,
+        "rmse_y0": rmse_y0,
+        "rmse_y1": rmse_y1,
         "pehe": pehe(y0, y1, mu0, mu1),
     }
 
