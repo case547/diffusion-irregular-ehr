@@ -80,7 +80,7 @@ class Denoiser(nn.Module):
     """ε_θ(noisy_y, τ | z, a) -- DiffPO-style denoiser conditioned on latent z and treatment a.
 
     diff_input = cond_proj([a, z]) + mapping_noise(noisy_y); ResidualBlocks refine;
-    dual output heads produce joint [ε̂_y0, ε̂_y1] prediction.
+    dual output heads produce joint [ε_y0, ε_y1] prediction.
     """
 
     def __init__(
@@ -94,17 +94,19 @@ class Denoiser(nn.Module):
     ):
         super().__init__()
         self.num_blocks = num_blocks
+
         self.cond_proj = nn.Linear(latent_dim + 1, block_dim)  # projects [a, z]
         self.mapping_noise = nn.Linear(2, block_dim)
-        self.diffusion_embedding = DiffusionEmbedding(
-            num_steps=num_steps, embedding_dim=embedding_dim
-        )
+
+        self.diffusion_embedding = DiffusionEmbedding(num_steps, embedding_dim)
         self.residual_layers = nn.ModuleList(
             [ResidualBlock(block_dim, embedding_dim) for _ in range(num_blocks)]
         )
+
         self.output_projection1 = nn.Linear(block_dim, hidden_dim)
         self.output_projection2 = nn.Linear(hidden_dim, hidden_dim)
         nn.init.zeros_(self.output_projection2.weight)
+
         self.y0_layer = nn.Linear(hidden_dim, hidden_dim)
         self.y1_layer = nn.Linear(hidden_dim, hidden_dim)
         self.output_y0 = nn.Linear(hidden_dim, 1)
@@ -120,14 +122,17 @@ class Denoiser(nn.Module):
         """noisy_y: (B,2), tau: (B,) long, z: (B, latent_dim), a: (B,) -> (B,2)"""
         cond = torch.cat([a.unsqueeze(-1), z], dim=-1)  # [B, latent_dim+1]
         h = F.relu(self.cond_proj(cond) + self.mapping_noise(noisy_y))  # [B, block_dim]
+
         diff_emb = self.diffusion_embedding(tau)
         skips = []
         for layer in self.residual_layers:
             h, skip = layer(h, diff_emb)
             skips.append(skip)
         h = torch.stack(skips).sum(dim=0) / math.sqrt(self.num_blocks)  # [B, block_dim]
+
         h = F.relu(self.output_projection1(h))  # [B, hidden_dim]
         h = F.relu(self.output_projection2(h))  # [B, hidden_dim]
+
         y0 = self.output_y0(F.relu(self.y0_layer(h)))  # [B, 1]
         y1 = self.output_y1(F.relu(self.y1_layer(h)))  # [B, 1]
         return torch.cat([y0, y1], dim=1)

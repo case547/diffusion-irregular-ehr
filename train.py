@@ -24,6 +24,7 @@ def calculate_val_loss(
     device: torch.device,
     propnet: PropensityNet | None = None,
     epoch_frac: float = 0.0,
+    pop_means: tuple[float, float] | None = None,
 ) -> dict[str, float]:
     """Mean of all loss components on loader. No sampling -- cheap forward pass only."""
     model.eval()
@@ -36,7 +37,7 @@ def calculate_val_loss(
             a = batch["a"].to(device)
             y = batch["y"].to(device)
             y_cf = batch["y_cf"].to(device)
-            comps = model.compute_loss(x, a, y, y_cf, propnet, epoch_frac)
+            comps = model.compute_loss(x, a, y, y_cf, propnet, epoch_frac, pop_means)
 
             for k, v in comps.items():
                 totals[k] += v.item()
@@ -146,6 +147,7 @@ def _train_loop(
     run_id: str,
     log_fn: Callable | None = None,
     propnet: PropensityNet | None = None,
+    pop_means: tuple[float, float] | None = None,
 ) -> None:
     """MultiStepLR training with early stopping on total val ELBO.
 
@@ -170,7 +172,7 @@ def _train_loop(
             y = batch["y"].to(device)
             y_cf = batch["y_cf"].to(device)
             optimizer.zero_grad()
-            comps = model.compute_loss(x, a, y, y_cf, propnet, epoch_frac)
+            comps = model.compute_loss(x, a, y, y_cf, propnet, epoch_frac, pop_means)
             loss = model.total_loss(comps)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -182,7 +184,9 @@ def _train_loop(
             n_batches += 1
 
         lr_scheduler.step()
-        val_comps = calculate_val_loss(model, val_loader, device, propnet, epoch_frac)
+        val_comps = calculate_val_loss(
+            model, val_loader, device, propnet, epoch_frac, pop_means
+        )
 
         if log_fn is not None:
             log = {f"train/{k}": v / n_batches for k, v in epoch_losses.items()}

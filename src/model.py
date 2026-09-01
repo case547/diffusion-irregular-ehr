@@ -26,6 +26,7 @@ class _DiffusionBase(nn.Module, ABC):
         y_cf: torch.Tensor,
         propnet: PropensityNet | None = None,
         epoch_frac: float = 0.0,
+        pop_means: tuple[float, float] | None = None,
     ) -> dict[str, torch.Tensor]: ...
 
     @abstractmethod
@@ -109,7 +110,7 @@ class _DiffusionBase(nn.Module, ABC):
         self,
         eps: torch.Tensor,
         eps_pred: torch.Tensor,
-        factual_mask: torch.Tensor,
+        gradient_mask: torch.Tensor,
         x: torch.Tensor | None = None,
         a: torch.Tensor | None = None,
         propnet: PropensityNet | None = None,
@@ -118,7 +119,7 @@ class _DiffusionBase(nn.Module, ABC):
 
         Optionally weighted by IPW if a PropensityNet is provided. Returns a scalar loss value.
         """
-        per_sample = (((eps_pred - eps) * factual_mask) ** 2).sum(dim=1)
+        per_sample = (((eps_pred - eps) * gradient_mask) ** 2).sum(dim=1)
 
         if propnet is not None:
             if x is None or a is None:
@@ -216,6 +217,7 @@ class HybridModel(_DiffusionBase):
         self._consistency_weight = diffusion_cfg.consistency_weight
         self._consistency_warmup_frac = diffusion_cfg.consistency_warmup_frac
         self._consistency_min_tau_frac = diffusion_cfg.consistency_min_tau_frac
+        self._cf_anchor_weight = diffusion_cfg.cf_anchor_weight
 
     def compute_loss(
         self,
@@ -225,6 +227,7 @@ class HybridModel(_DiffusionBase):
         y_cf: torch.Tensor,
         propnet: PropensityNet | None = None,
         epoch_frac: float = 0.0,
+        pop_means: tuple[float, float] | None = None,
     ) -> dict[str, torch.Tensor]:
         # Encode -- reparameterised; z retains grad for full end-to-end training
         z, mu, sigma = self.encoder.rsample(x, a, y_fac)
@@ -233,13 +236,29 @@ class HybridModel(_DiffusionBase):
         log_pa = self.a_decoder.log_prob(z, a).mean()
         kl = 0.5 * (mu.pow(2) + sigma.pow(2) - 2.0 * sigma.log() - 1.0).sum(-1).mean()
 
+        anchor_active = self._cf_anchor_weight > 0.0 and pop_means is not None
+
+        if anchor_active:
+            # Leak-free anchor: replace true y_cf with opposite arm's population mean
+            popmean_0, popmean_1 = pop_means
+            cf_target = torch.where(
+                a == 1, torch.full_like(a, popmean_0), torch.full_like(a, popmean_1)
+            )
+        else:
+            cf_target = y_cf
+
         noisy_y, tau, eps, factual_mask = self._noise_targets(
-            x.shape[0], x.device, a, y_fac, y_cf
+            x.shape[0], x.device, a, y_fac, cf_target
         )
         eps_pred: torch.Tensor = self.denoiser(noisy_y, tau, z, a)
 
+        if anchor_active:
+            gradient_mask = factual_mask + self._cf_anchor_weight * (1.0 - factual_mask)
+        else:
+            gradient_mask = factual_mask
+
         diffusion_loss = self.calculate_diffusion_loss(
-            eps, eps_pred, factual_mask, x, a, propnet
+            eps, eps_pred, gradient_mask, x, a, propnet
         )
 
         log_ry = self.aux_outcome.log_prob(x, a, y_fac).mean()
@@ -343,6 +362,7 @@ class DiffPO(_DiffusionBase):
         y_cf: torch.Tensor,
         propnet: PropensityNet | None = None,
         epoch_frac: float = 0.0,
+        pop_means: tuple[float, float] | None = None,
     ) -> dict[str, torch.Tensor]:
         noisy_y, tau, eps, factual_mask = self._noise_targets(
             x.shape[0], x.device, a, y_fac, y_cf

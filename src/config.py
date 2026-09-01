@@ -22,6 +22,7 @@ class DiffusionConfig(BaseModel):
     consistency_weight: float = 0.0
     consistency_warmup_frac: float = 0.5
     consistency_min_tau_frac: float = 0.5
+    cf_anchor_weight: float = 0.0
 
 
 class TrainConfig(BaseModel):
