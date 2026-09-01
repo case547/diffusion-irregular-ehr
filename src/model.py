@@ -135,6 +135,26 @@ class _DiffusionBase(nn.Module, ABC):
         else:
             return per_sample.mean()
 
+    def _apply_cf_anchor(
+        self, a: torch.Tensor, y_cf: torch.Tensor, pop_means: tuple[float, float] | None
+    ) -> tuple[torch.Tensor, bool]:
+        """Leak-free counterfactual-slot substitution, shared by HybridModel and DiffPO.
+
+        Returns (cf_target, anchor_active). cf_target replaces y_cf as _noise_targets'
+        input when the anchor is active; anchor_active is the single source of truth the
+        caller must reuse when deciding whether to also soften factual_mask once
+        _noise_targets returns it -- see
+        docs/superpowers/specs/2026-08-31-cf-population-mean-anchor-design.md's amendment
+        for why that decision must not be re-derived twice (it drifted out of sync once).
+        """
+        anchor_active = self._cf_anchor_weight > 0.0 and pop_means is not None
+        if not anchor_active:
+            return y_cf, False
+        pm0, pm1 = pop_means
+        # a=1 subjects: factual=y1, counterfactual=y0 -> anchor to pm0 (and vice versa)
+        cf_target = torch.where(a == 1, torch.full_like(a, pm0), torch.full_like(a, pm1))
+        return cf_target, True
+
     def _ddpm_reverse(
         self,
         BK: int,
@@ -236,16 +256,7 @@ class HybridModel(_DiffusionBase):
         log_pa = self.a_decoder.log_prob(z, a).mean()
         kl = 0.5 * (mu.pow(2) + sigma.pow(2) - 2.0 * sigma.log() - 1.0).sum(-1).mean()
 
-        anchor_active = self._cf_anchor_weight > 0.0 and pop_means is not None
-
-        if anchor_active:
-            # Leak-free anchor: replace true y_cf with opposite arm's population mean
-            popmean_0, popmean_1 = pop_means
-            cf_target = torch.where(
-                a == 1, torch.full_like(a, popmean_0), torch.full_like(a, popmean_1)
-            )
-        else:
-            cf_target = y_cf
+        cf_target, anchor_active = self._apply_cf_anchor(a, y_cf, pop_means)
 
         noisy_y, tau, eps, factual_mask = self._noise_targets(
             x.shape[0], x.device, a, y_fac, cf_target
