@@ -141,18 +141,18 @@ class _DiffusionBase(nn.Module, ABC):
     ) -> tuple[torch.Tensor, bool]:
         """Leak-free counterfactual-slot substitution, shared by HybridModel and DiffPO.
 
-        Returns (cf_target, anchor_active). cf_target replaces y_cf as _noise_targets'
-        input when the anchor is active; anchor_active is the single source of truth the
-        caller must reuse when deciding whether to also soften factual_mask once
-        _noise_targets returns it -- see
-        docs/superpowers/specs/2026-08-31-cf-population-mean-anchor-design.md's amendment
-        for why that decision must not be re-derived twice (it drifted out of sync once).
+        Returns `(cf_target, anchor_active)`.
+
+        `cf_target` replaces `y_cf` as the input to `_noise_targets` when the anchor is
+        active; `anchor_active` is the single source of truth the caller must reuse when
+        deciding whether to also soften factual_mask once `_noise_targets` returns it.
         """
         anchor_active = self._cf_anchor_weight > 0.0 and pop_means is not None
         if not anchor_active:
             return y_cf, False
+
         pm0, pm1 = pop_means
-        # a=1 subjects: factual=y1, counterfactual=y0 -> anchor to pm0 (and vice versa)
+        # For a=1 subjects: y_fac=Y(1), y_cf=Y(0) -> anchor Y(0) to pm0 (and vice versa)
         cf_target = torch.where(a == 1, torch.full_like(a, pm0), torch.full_like(a, pm1))
         return cf_target, True
 
