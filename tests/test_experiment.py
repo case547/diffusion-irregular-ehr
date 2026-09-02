@@ -69,7 +69,7 @@ def test_run_condition_pretrains_aux_outcome_for_hybrid_with_anchor(monkeypatch)
     calls = []
     monkeypatch.setattr(
         "experiment.train_aux_outcome",
-        lambda aux, train_loader, val_loader, cfg, device: calls.append(True),
+        lambda aux, train_loader, val_loader, cfg, device, log_fn=None: calls.append(True),
     )
     cfg = SMALL_CFG.model_copy(
         update={"diffusion": SMALL_CFG.diffusion.model_copy(update={"cf_anchor_weight": 0.1})}
@@ -83,7 +83,7 @@ def test_run_condition_skips_pretrain_when_anchor_off(monkeypatch):
     calls = []
     monkeypatch.setattr(
         "experiment.train_aux_outcome",
-        lambda aux, train_loader, val_loader, cfg, device: calls.append(True),
+        lambda aux, train_loader, val_loader, cfg, device, log_fn=None: calls.append(True),
     )
     ds = _ds()
     run_condition("test_pretrain_off", SMALL_CFG, train_ds=ds, val_ds=ds, test_ds=ds)
@@ -96,7 +96,7 @@ def test_run_condition_skips_pretrain_for_diffpo(monkeypatch):
     calls = []
     monkeypatch.setattr(
         "experiment.train_aux_outcome",
-        lambda aux, train_loader, val_loader, cfg, device: calls.append(True),
+        lambda aux, train_loader, val_loader, cfg, device, log_fn=None: calls.append(True),
     )
     cfg = SMALL_CFG.model_copy(
         update={"diffusion": SMALL_CFG.diffusion.model_copy(update={"cf_anchor_weight": 0.1})}

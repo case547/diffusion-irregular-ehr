@@ -41,7 +41,16 @@ def run_condition(
     Path(cfg.train.checkpoint_dir).mkdir(parents=True, exist_ok=True)
 
     if isinstance(model, HybridModel) and cfg.diffusion.cf_anchor_weight > 0.0:
-        train_aux_outcome(model.aux_outcome, train_loader, val_loader, cfg, device)
+        # Tag pretraining's own (independently-numbered) epoch counter with its own
+        # step key so it doesn't collide with _train_loop's "train/step" below.
+        pretrain_log_fn = (
+            None
+            if log_fn is None
+            else lambda d, step: log_fn({**d, "pretrain_aux/step": step}, step)
+        )
+        train_aux_outcome(
+            model.aux_outcome, train_loader, val_loader, cfg, device, log_fn=pretrain_log_fn
+        )
 
     _train_loop(model, train_loader, val_loader, cfg, device, run_id, log_fn, propnet)
 
@@ -168,6 +177,7 @@ if __name__ == "__main__":
             run.define_metric("propnet/*", step_metric="propnet/step")
             run.define_metric("train/*", step_metric="train/step")
             run.define_metric("val/*", step_metric="train/step")
+            run.define_metric("pretrain_aux/*", step_metric="pretrain_aux/step")
 
             propnet = None
             if model_cls is DiffPO or cfg.diffusion.use_propnet:

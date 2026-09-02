@@ -20,8 +20,8 @@ class DiffusionConfig(BaseModel):
     clip_denoised: bool = False
     use_propnet: bool = False
     cf_anchor_weight: float = 0.0  # soft-mask weight for the counterfactual slot, anchored to
-                                    # a pre-trained AuxOutcome's per-subject prediction
-                                    # (0 = off, today's hard factual_mask). HybridModel only.
+                                   # a pre-trained AuxOutcome's per-subject prediction
+                                   # (0 = off, today's hard factual_mask). HybridModel only.
 
 
 class TrainConfig(BaseModel):
