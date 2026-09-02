@@ -208,17 +208,16 @@ def train_aux_outcome(
     device: torch.device,
     log_fn: Callable | None = None,
     patience: int = 10,
-    min_epochs: int = 200,
+    min_epochs: int = 50,
 ) -> None:
     """Train AuxOutcome standalone via factual-only NLL: -log_prob(x, a, y_fac).mean().
 
     Pre-trains AuxOutcome before it's handed to HybridModel's own training loop (where it
-    continues training via log_ry, unfrozen) -- removes the cold-start problem the old
-    consistency loss's warmup ramp existed to protect against, without needing a ramp.
+    continues training via log_ry, unfrozen).
+
     Mirrors _train_loop's optimizer/LR-schedule/clipping shape, plus early stopping on val
-    loss matching PropensityNet.fit's pattern (patience=10, min_epochs=200 defaults, same
-    as PropensityNet's patience/n_iter_min). No checkpointing here -- _train_loop saves the
-    full HybridModel, aux_outcome included, once the main loop finishes.
+    loss matching PropensityNet.fit's pattern. No checkpointing here, as _train_loop saves
+    the full HybridModel, aux_outcome included, once the main loop finishes.
     """
     aux.to(device)
     optimizer = Adam(aux.parameters(), lr=cfg.train.lr, weight_decay=1e-6)
@@ -230,6 +229,7 @@ def train_aux_outcome(
     val_loss_best = float("inf")
     patience_left = patience
     best_state = None
+    best_epoch = None
 
     for epoch in range(cfg.train.epochs):
         aux.train()
@@ -263,21 +263,25 @@ def train_aux_outcome(
                 epoch + 1,
             )
         logger.info(
-            "[AuxOutcome pretrain] Epoch %d: train_nll %.4f, val_nll %.4f",
-            epoch + 1, train_loss, val_loss,
+            "AuxOutcome pretrain epoch %d: train_nll=%.4f, val_nll=%.4f",
+            epoch + 1,
+            train_loss,
+            val_loss,
         )
 
         if val_loss < val_loss_best:
             val_loss_best = val_loss
             patience_left = patience
             best_state = {k: v.clone() for k, v in aux.state_dict().items()}
+            best_epoch = epoch
         else:
             patience_left -= 1
 
         if patience_left <= 0 and epoch >= min_epochs:
-            logger.info("[AuxOutcome pretrain] Early stopping at epoch %d", epoch + 1)
+            logger.info("AuxOutcome pretrain: Early stopping at epoch %d", epoch + 1)
             break
 
     if best_state is not None:
         aux.load_state_dict(best_state)
+        logger.info("AuxOutcome pretrain: Restored best model from epoch %d", best_epoch + 1)
     aux.eval()
