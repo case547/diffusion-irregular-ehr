@@ -18,7 +18,7 @@ diffusion:
   consistency_weight: 0        # auxiliary counterfactual consistency loss weight (0=off)
   consistency_warmup_frac: 0.25  # frac of training over which weight ramps up
   consistency_min_tau_frac: 0.5  # exclude tau < frac*L (ill-conditioned + leaky)
-  cf_anchor_weight: 1.0          # soft-mask weight for the counterfactual slot, anchored to per-arm population means
+  cf_anchor_weight: 0.0          # soft-mask weight for the counterfactual slot, anchored to per-arm population means
 
 train:
   epochs: 500
