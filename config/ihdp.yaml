@@ -8,17 +8,17 @@ diffusion:
   num_steps: 200       # L diffusion steps
   beta_start: 0.0001
   beta_end: 0.1
-  schedule: quad       # quadratic; DiffPO default for tabular PO data
-  embedding_dim: 32    # sinusoidal time embedding dim; matched to block_dim to avoid 4x reduction in diffusion_projection
-  block_dim: 32        # I/O width of cond_proj, mapping_noise, and each ResidualBlock; proportionate to latent_dim=20 on IHDP (~985 subjects)
-  hidden_dim: 32       # output head width (output_projection1/2, y0/y1 layers); contracts like DiffPO (cond_dim -> hidden_dim)
-  num_blocks: 4        # number of residual blocks
+  schedule: quad     # quadratic; DiffPO default for tabular PO data
+  embedding_dim: 32  # sinusoidal time embedding dim; matched to block_dim to avoid 4x reduction in diffusion_projection
+  block_dim: 32      # I/O width of cond_proj, mapping_noise, and each ResidualBlock; proportionate to latent_dim=20 on IHDP (~985 subjects)
+  hidden_dim: 32     # output head width (output_projection1/2, y0/y1 layers); contracts like DiffPO (cond_dim -> hidden_dim)
+  num_blocks: 4      # number of residual blocks
   clip_denoised: True  # whether to clip denoised predictions during reverse diffusion
-  use_propnet: True   # whether to use PropensityNet to weight HybridModel's diffusion loss
-  consistency_weight: 0        # auxiliary counterfactual consistency loss weight (0=off)
+  use_propnet: True  # whether to use PropensityNet to weight HybridModel's diffusion loss
+  consistency_weight: 0          # auxiliary counterfactual consistency loss weight (0=off)
   consistency_warmup_frac: 0.25  # frac of training over which weight ramps up
   consistency_min_tau_frac: 0.5  # exclude tau < frac*L (ill-conditioned + leaky)
-  cf_anchor_weight: 0.0          # soft-mask weight for the counterfactual slot, anchored to per-arm population means
+  cf_anchor_weight: 0.92  # soft-mask weight for the counterfactual slot, anchored to per-arm population means
 
 train:
   epochs: 500
@@ -30,7 +30,7 @@ train:
 
 data:
   path: data/ihdp
-  replication: 1          # which IHDP NPCI replication(s) to use (1-indexed, 1-10 available)
-  train_ratio: 0.7        # 70% train
-  test_ratio: 0.15        # 15% test; val inferred as remaining (1 - train_ratio - test_ratio = 0.15)
+  replication: 1    # which IHDP NPCI replication(s) to use (1-indexed, 1-10 available)
+  train_ratio: 0.7  # 70% train
+  test_ratio: 0.15  # 15% test; val inferred as remaining (1 - train_ratio - test_ratio = 0.15)
   confounder_effect: 0.4  # momblack's direct outcome effect; largest value in Hill's own beta grid
