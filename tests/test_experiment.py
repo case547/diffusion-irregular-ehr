@@ -63,3 +63,89 @@ def test_run_condition_returns_metrics():
     for v in result_test.values():
         assert isinstance(v, float)
         assert np.isfinite(v)
+
+
+def test_run_condition_pretrains_aux_outcome_for_hybrid_with_anchor(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "experiment.train_aux_outcome",
+        lambda aux, train_loader, val_loader, cfg, device, log_fn=None: calls.append(True),
+    )
+    cfg = SMALL_CFG.model_copy(
+        update={"diffusion": SMALL_CFG.diffusion.model_copy(update={"cf_anchor_weight": 0.1})}
+    )
+    ds = _ds()
+    run_condition("test_pretrain_on", cfg, train_ds=ds, val_ds=ds, test_ds=ds)
+    assert len(calls) == 1
+
+
+def test_run_condition_skips_pretrain_when_anchor_off(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "experiment.train_aux_outcome",
+        lambda aux, train_loader, val_loader, cfg, device, log_fn=None: calls.append(True),
+    )
+    ds = _ds()
+    run_condition("test_pretrain_off", SMALL_CFG, train_ds=ds, val_ds=ds, test_ds=ds)
+    assert len(calls) == 0
+
+
+def test_run_condition_freezes_aux_outcome_after_pretrain(monkeypatch):
+    monkeypatch.setattr(
+        "experiment.train_aux_outcome",
+        lambda aux, train_loader, val_loader, cfg, device, log_fn=None: None,
+    )
+    cfg = SMALL_CFG.model_copy(
+        update={"diffusion": SMALL_CFG.diffusion.model_copy(update={"cf_anchor_weight": 0.1})}
+    )
+    ds = _ds()
+    from src.model import HybridModel
+
+    captured = {}
+    orig_init = HybridModel.__init__
+
+    def spy_init(self, *args, **kwargs):
+        orig_init(self, *args, **kwargs)
+        captured["model"] = self
+
+    monkeypatch.setattr(HybridModel, "__init__", spy_init)
+    run_condition("test_freeze_on", cfg, train_ds=ds, val_ds=ds, test_ds=ds)
+    assert all(not p.requires_grad for p in captured["model"].aux_outcome.parameters())
+
+
+def test_run_condition_leaves_aux_outcome_trainable_when_anchor_off(monkeypatch):
+    monkeypatch.setattr(
+        "experiment.train_aux_outcome",
+        lambda aux, train_loader, val_loader, cfg, device, log_fn=None: None,
+    )
+    ds = _ds()
+    from src.model import HybridModel
+
+    captured = {}
+    orig_init = HybridModel.__init__
+
+    def spy_init(self, *args, **kwargs):
+        orig_init(self, *args, **kwargs)
+        captured["model"] = self
+
+    monkeypatch.setattr(HybridModel, "__init__", spy_init)
+    run_condition("test_freeze_off", SMALL_CFG, train_ds=ds, val_ds=ds, test_ds=ds)
+    assert all(p.requires_grad for p in captured["model"].aux_outcome.parameters())
+
+
+def test_run_condition_skips_pretrain_for_diffpo(monkeypatch):
+    from src.model import DiffPO
+
+    calls = []
+    monkeypatch.setattr(
+        "experiment.train_aux_outcome",
+        lambda aux, train_loader, val_loader, cfg, device, log_fn=None: calls.append(True),
+    )
+    cfg = SMALL_CFG.model_copy(
+        update={"diffusion": SMALL_CFG.diffusion.model_copy(update={"cf_anchor_weight": 0.1})}
+    )
+    ds = _ds()
+    run_condition(
+        "test_pretrain_diffpo", cfg, train_ds=ds, val_ds=ds, test_ds=ds, model_cls=DiffPO
+    )
+    assert len(calls) == 0

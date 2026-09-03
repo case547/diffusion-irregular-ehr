@@ -3,14 +3,16 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
 import torch
 from torch.optim import Adam
 from torch.utils.data import DataLoader
 
+from src.auxiliary import AuxOutcome
 from src.config import Config, DataConfig, DiffusionConfig, ModelConfig, TrainConfig
 from src.data import CausalDataset
 from src.model import HybridModel
-from train import calculate_val_loss
+from train import calculate_val_loss, train_aux_outcome
 
 MODEL_CFG = ModelConfig(feature_dim=5, latent_dim=4, hidden_dim=16, num_layers=2)
 DIFF_CFG = DiffusionConfig(
@@ -114,3 +116,124 @@ def test_checkpoint_saved(tmp_path):
     assert ckpt_path.exists()
     model2 = HybridModel(cfg.model, cfg.diffusion)
     model2.load_state_dict(torch.load(ckpt_path, map_location="cpu"))  # must not raise
+
+
+def _aux_loaders(n: int = 64, f: int = 5, batch_size: int = 16):
+    """Train/val loaders with DIFFERENT underlying data -- val loss should plateau or
+    worsen quickly on random data unrelated to train, giving early stopping something
+    real to trigger on."""
+    train_ds = CausalDataset(
+        np.random.randn(n, f).astype(np.float32),
+        np.random.randint(0, 2, n).astype(np.float32),
+        np.random.randn(n).astype(np.float32),
+    )
+    val_ds = CausalDataset(
+        np.random.randn(n, f).astype(np.float32),
+        np.random.randint(0, 2, n).astype(np.float32),
+        np.random.randn(n).astype(np.float32),
+    )
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_ds, batch_size=batch_size)
+    return train_loader, val_loader
+
+
+def test_train_aux_outcome_loss_decreases():
+    torch.manual_seed(0)
+    np.random.seed(0)
+    train_loader, val_loader = _aux_loaders()
+    aux = AuxOutcome(MODEL_CFG.feature_dim, MODEL_CFG.hidden_dim, MODEL_CFG.num_layers)
+    cfg = Config(
+        model=MODEL_CFG,
+        diffusion=DIFF_CFG,
+        train=TrainConfig(
+            epochs=20, batch_size=16, lr=1e-2, seed=0, K=2, checkpoint_dir="/tmp"
+        ),
+        data=DataConfig(path="data/ihdp", replication=1, train_ratio=0.7, test_ratio=0.15),
+    )
+    device = torch.device("cpu")
+
+    aux.eval()
+    with torch.no_grad():
+        batch = next(iter(train_loader))
+        x, a, y = batch["x"], batch["a"], batch["y"]
+        loss_before = -aux.log_prob(x, a, y).mean().item()
+
+    train_aux_outcome(aux, train_loader, val_loader, cfg, device, patience=20, min_epochs=20)
+
+    aux.eval()
+    with torch.no_grad():
+        loss_after = -aux.log_prob(x, a, y).mean().item()
+    assert loss_after < loss_before
+
+
+def test_train_aux_outcome_early_stopping_fires():
+    """patience=1, min_epochs=1, and a val set unrelated to train -- val loss should fail
+    to improve almost immediately, so training must halt well before cfg.train.epochs."""
+    torch.manual_seed(1)
+    np.random.seed(1)
+    train_loader, val_loader = _aux_loaders()
+    aux = AuxOutcome(MODEL_CFG.feature_dim, MODEL_CFG.hidden_dim, MODEL_CFG.num_layers)
+    cfg = Config(
+        model=MODEL_CFG,
+        diffusion=DIFF_CFG,
+        train=TrainConfig(
+            epochs=50, batch_size=16, lr=1e-2, seed=1, K=2, checkpoint_dir="/tmp"
+        ),
+        data=DataConfig(path="data/ihdp", replication=1, train_ratio=0.7, test_ratio=0.15),
+    )
+    device = torch.device("cpu")
+
+    epochs_logged = []
+    train_aux_outcome(
+        aux,
+        train_loader,
+        val_loader,
+        cfg,
+        device,
+        log_fn=lambda d, step: epochs_logged.append(step),
+        patience=1,
+        min_epochs=1,
+    )
+    assert len(epochs_logged) < 50, "training ran to completion instead of stopping early"
+
+
+def test_train_aux_outcome_restores_best_state():
+    """Tiny patience so the best snapshot is taken early and training continues a couple
+    more epochs before stopping -- assert the FINAL weights match the best-epoch snapshot,
+    not whatever the last (worse) epoch trained to."""
+    torch.manual_seed(2)
+    np.random.seed(2)
+    train_loader, val_loader = _aux_loaders()
+    aux = AuxOutcome(MODEL_CFG.feature_dim, MODEL_CFG.hidden_dim, MODEL_CFG.num_layers)
+    cfg = Config(
+        model=MODEL_CFG,
+        diffusion=DIFF_CFG,
+        train=TrainConfig(
+            epochs=50, batch_size=16, lr=1e-1, seed=2, K=2, checkpoint_dir="/tmp"
+        ),
+        data=DataConfig(path="data/ihdp", replication=1, train_ratio=0.7, test_ratio=0.15),
+    )
+    device = torch.device("cpu")
+
+    val_losses = []
+
+    train_aux_outcome(
+        aux,
+        train_loader,
+        val_loader,
+        cfg,
+        device,
+        log_fn=lambda d, step: val_losses.append(d["pretrain_aux/val_nll"]),
+        patience=2,
+        min_epochs=1,
+    )
+    best_val_loss_seen = min(val_losses)
+
+    aux.eval()
+    with torch.no_grad():
+        batch = next(iter(val_loader))
+        x, a, y = batch["x"], batch["a"], batch["y"]
+        final_val_loss = -aux.log_prob(x, a, y).mean().item()
+    # the restored (best) state's val loss on this same batch should be at or near the
+    # best value logged during training, not the (worse) value from a later epoch
+    assert final_val_loss == pytest.approx(best_val_loss_seen, abs=0.5)

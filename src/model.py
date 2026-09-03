@@ -16,7 +16,6 @@ class _DiffusionBase(nn.Module, ABC):
     """Shared noise schedule and DDPM helpers for HybridModel and DiffPO."""
 
     denoiser: Denoiser
-    _cf_anchor_weight: float = 0.0
 
     @abstractmethod
     def compute_loss(
@@ -26,8 +25,6 @@ class _DiffusionBase(nn.Module, ABC):
         y_fac: torch.Tensor,
         y_cf: torch.Tensor,
         propnet: PropensityNet | None = None,
-        epoch_frac: float = 0.0,
-        pop_means: tuple[float, float] | None = None,
     ) -> dict[str, torch.Tensor]: ...
 
     @abstractmethod
@@ -136,26 +133,6 @@ class _DiffusionBase(nn.Module, ABC):
         else:
             return per_sample.mean()
 
-    def _apply_cf_anchor(
-        self, a: torch.Tensor, y_cf: torch.Tensor, pop_means: tuple[float, float] | None
-    ) -> tuple[torch.Tensor, bool]:
-        """Leak-free counterfactual-slot substitution, shared by HybridModel and DiffPO.
-
-        Returns `(cf_target, anchor_active)`.
-
-        `cf_target` replaces `y_cf` as the input to `_noise_targets` when the anchor is
-        active; `anchor_active` is the single source of truth the caller must reuse when
-        deciding whether to also soften factual_mask once `_noise_targets` returns it.
-        """
-        anchor_active = self._cf_anchor_weight > 0.0 and pop_means is not None
-        if not anchor_active:
-            return y_cf, False
-
-        pm0, pm1 = pop_means
-        # For a=1 subjects: y_fac=Y(1), y_cf=Y(0) -> anchor Y(0) to pm0 (and vice versa)
-        cf_target = torch.where(a == 1, torch.full_like(a, pm0), torch.full_like(a, pm1))
-        return cf_target, True
-
     def _ddpm_reverse(
         self,
         BK: int,
@@ -235,10 +212,25 @@ class HybridModel(_DiffusionBase):
             num_steps=diffusion_cfg.num_steps,
         )
         self._init_schedule(diffusion_cfg)
-        self._consistency_weight = diffusion_cfg.consistency_weight
-        self._consistency_warmup_frac = diffusion_cfg.consistency_warmup_frac
-        self._consistency_min_tau_frac = diffusion_cfg.consistency_min_tau_frac
         self._cf_anchor_weight = diffusion_cfg.cf_anchor_weight
+
+    def _apply_cf_anchor(
+        self, x: torch.Tensor, a: torch.Tensor, y_cf: torch.Tensor
+    ) -> tuple[torch.Tensor, bool]:
+        """Leak-free counterfactual-slot substitution, anchored to a pre-trained (but
+        still continuously training, per its own log_ry term) AuxOutcome's per-subject
+        prediction.
+
+        Returns (cf_target, anchor_active). Detached: gradient reaches only the denoiser,
+        never aux_outcome, which is trained solely via its own log_ry term -- avoids the
+        two components co-adapting into a mutually-reinforcing but inaccurate state.
+        """
+        anchor_active = self._cf_anchor_weight > 0.0
+        if not anchor_active:
+            return y_cf, False
+        with torch.no_grad():
+            cf_target = self.aux_outcome.mean(x, 1.0 - a)
+        return cf_target, True
 
     def compute_loss(
         self,
@@ -247,8 +239,6 @@ class HybridModel(_DiffusionBase):
         y_fac: torch.Tensor,
         y_cf: torch.Tensor,
         propnet: PropensityNet | None = None,
-        epoch_frac: float = 0.0,
-        pop_means: tuple[float, float] | None = None,
     ) -> dict[str, torch.Tensor]:
         # Encode -- reparameterised; z retains grad for full end-to-end training
         z, mu, sigma = self.encoder.rsample(x, a, y_fac)
@@ -257,7 +247,7 @@ class HybridModel(_DiffusionBase):
         log_pa = self.a_decoder.log_prob(z, a).mean()
         kl = 0.5 * (mu.pow(2) + sigma.pow(2) - 2.0 * sigma.log() - 1.0).sum(-1).mean()
 
-        cf_target, anchor_active = self._apply_cf_anchor(a, y_cf, pop_means)
+        cf_target, anchor_active = self._apply_cf_anchor(x, a, y_cf)
 
         noisy_y, tau, eps, factual_mask = self._noise_targets(
             x.shape[0], x.device, a, y_fac, cf_target
@@ -283,51 +273,17 @@ class HybridModel(_DiffusionBase):
             "log_ry": log_ry,
         }
 
-        if self._consistency_weight > 0.0:
-            # Pseudo-target for each subject's *counterfactual* arm, from the separately
-            # trained aux_outcome regressor -- leak-free (aux_outcome only ever trains on
-            # factual (x,a,y) triples). Detached: gradient must reach only the denoiser,
-            # never aux_outcome (which is trained solely via its own log_ry term above).
-            with torch.no_grad():
-                y_pseudo_cf = self.aux_outcome.mean(x, 1.0 - a)
-
-            # Place the pseudo value in whichever slot is counterfactual per subject
-            pseudo_y_both = torch.stack([y_pseudo_cf * a, y_pseudo_cf * (1.0 - a)], dim=1)
-            cf_mask = 1.0 - factual_mask
-
-            # eps-space form: avoids dividing by sqrt(alpha_bar), equivalent to matching
-            # the clean-data estimate to y_pseudo, but with no division by sqrt(alpha_bar)
-            ab_tau = self.alpha_bar_sched[tau].unsqueeze(1)
-            eps_target = (noisy_y - ab_tau.sqrt() * pseudo_y_both) / (
-                1.0 - ab_tau
-            ).sqrt().clamp(min=1e-6)
-            cf_sq_err = (((eps_pred - eps_target) * cf_mask) ** 2).sum(dim=1)
-
-            # Exclude low tau: ill-conditioned here (small divisor above), and where the
-            # clean-data estimate would mostly leak the true (unobservable) y_cf baked
-            # into noisy_y by _noise_targets, rather than test against y_pseudo.
-            min_tau = int(self._consistency_min_tau_frac * self.L)
-            tau_mask = (tau >= min_tau).float()
-
-            consistency_raw = (cf_sq_err * tau_mask).sum() / tau_mask.sum().clamp(min=1.0)
-            ramp = min(1.0, epoch_frac / max(self._consistency_warmup_frac, 1e-8))
-            out["consistency_loss"] = (self._consistency_weight * ramp) * consistency_raw
-            out["consistency_raw"] = consistency_raw.detach()
-
         return out
 
     def total_loss(self, components: dict[str, torch.Tensor]) -> torch.Tensor:
         """Minimise -F."""
-        loss = (
+        return (
             -components["log_px"]
             - components["log_pa"]
             + components["kl"]
             + components["diffusion_loss"]
             - components["log_ry"]
         )
-        if "consistency_loss" in components:
-            loss = loss + components["consistency_loss"]
-        return loss
 
     @torch.no_grad()
     def sample_outcomes(
@@ -365,7 +321,6 @@ class DiffPO(_DiffusionBase):
             num_steps=diffusion_cfg.num_steps,
         )
         self._init_schedule(diffusion_cfg)
-        self._cf_anchor_weight = diffusion_cfg.cf_anchor_weight
 
     def compute_loss(
         self,
@@ -374,23 +329,13 @@ class DiffPO(_DiffusionBase):
         y_fac: torch.Tensor,
         y_cf: torch.Tensor,
         propnet: PropensityNet | None = None,
-        epoch_frac: float = 0.0,
-        pop_means: tuple[float, float] | None = None,
     ) -> dict[str, torch.Tensor]:
-        cf_target, anchor_active = self._apply_cf_anchor(a, y_cf, pop_means)
-
         noisy_y, tau, eps, factual_mask = self._noise_targets(
-            x.shape[0], x.device, a, y_fac, cf_target
+            x.shape[0], x.device, a, y_fac, y_cf
         )
         eps_pred: torch.Tensor = self.denoiser(noisy_y, tau, x, a)
-
-        if anchor_active:
-            gradient_mask = factual_mask + self._cf_anchor_weight * (1.0 - factual_mask)
-        else:
-            gradient_mask = factual_mask
-
         diffusion_loss = self.calculate_diffusion_loss(
-            eps, eps_pred, gradient_mask, x, a, propnet
+            eps, eps_pred, factual_mask, x, a, propnet
         )
         return {"diffusion_loss": diffusion_loss}
 
