@@ -104,35 +104,6 @@ class _DiffusionBase(nn.Module, ABC):
 
         return noisy_y, tau, eps, factual_mask
 
-    def calculate_diffusion_loss(
-        self,
-        eps: torch.Tensor,
-        eps_pred: torch.Tensor,
-        gradient_mask: torch.Tensor,
-        x: torch.Tensor | None = None,
-        a: torch.Tensor | None = None,
-        propnet: PropensityNet | None = None,
-    ) -> torch.Tensor:
-        """Calculate the diffusion loss term E_z,τ,ε[‖ε - ε_θ(⋅)‖²]
-
-        Optionally weighted by IPW if a PropensityNet is provided. Returns a scalar loss value.
-        """
-        per_sample = (((eps_pred - eps) * gradient_mask) ** 2).sum(dim=1)
-
-        if propnet is not None:
-            if x is None or a is None:
-                raise ValueError(
-                    "x and a must be provided if propnet is not None for IPW weighting"
-                )
-
-            with torch.no_grad():
-                ipw = propnet.get_importance_weights(x, a)
-            ipw = ipw.clamp(0.5, 3.0)
-            ipw = ipw / ipw.mean()
-            return (per_sample * ipw).mean()
-        else:
-            return per_sample.mean()
-
     def _ddpm_reverse(
         self,
         BK: int,
@@ -192,8 +163,8 @@ class HybridModel(_DiffusionBase):
           - E_z,τ,ε[‖ε - ε_θ(y_τ,τ|z,a)‖²]
           + log r_φ(y|x,a)
 
-    Optional IPW weighting of the diffusion term via a pre-trained frozen PropensityNet,
-    matching DiffPO's.
+    No IPW weighting: unconfoundedness at x doesn't hold under hidden confounding, so an
+    x-space PropensityNet would estimate the wrong propensity here (unlike DiffPO's).
     """
 
     def __init__(self, model_cfg: ModelConfig, diffusion_cfg: DiffusionConfig):
@@ -240,6 +211,13 @@ class HybridModel(_DiffusionBase):
         y_cf: torch.Tensor,
         propnet: PropensityNet | None = None,
     ) -> dict[str, torch.Tensor]:
+        # propnet accepted only for call-site parity with train.py's polymorphic
+        # model.compute_loss(x, a, y, y_cf, propnet) -- never used: an x-space propensity
+        # is the wrong nuisance function under hidden confounding (see class docstring).
+        assert propnet is None, (
+            "HybridModel does not support x-space IPW weighting -- see class docstring"
+        )
+
         # Encode -- reparameterised; z retains grad for full end-to-end training
         z, mu, sigma = self.encoder.rsample(x, a, y_fac)
 
@@ -259,9 +237,8 @@ class HybridModel(_DiffusionBase):
         else:
             gradient_mask = factual_mask
 
-        diffusion_loss = self.calculate_diffusion_loss(
-            eps, eps_pred, gradient_mask, x, a, propnet
-        )
+        # Diffusion loss term E_z,τ,ε[‖ε - ε_θ(⋅)‖²]
+        diffusion_loss = (((eps_pred - eps) * gradient_mask) ** 2).sum(dim=1).mean()
 
         log_ry = self.aux_outcome.log_prob(x, a, y_fac).mean()
 
@@ -334,9 +311,18 @@ class DiffPO(_DiffusionBase):
             x.shape[0], x.device, a, y_fac, y_cf
         )
         eps_pred: torch.Tensor = self.denoiser(noisy_y, tau, x, a)
-        diffusion_loss = self.calculate_diffusion_loss(
-            eps, eps_pred, factual_mask, x, a, propnet
-        )
+
+        per_sample = (((eps_pred - eps) * factual_mask) ** 2).sum(dim=1)
+
+        if propnet is not None:
+            with torch.no_grad():
+                ipw = propnet.get_importance_weights(x, a)
+            ipw = ipw.clamp(0.5, 3.0)
+            ipw = ipw / ipw.mean()
+            diffusion_loss = (per_sample * ipw).mean()
+        else:
+            diffusion_loss = per_sample.mean()
+
         return {"diffusion_loss": diffusion_loss}
 
     def total_loss(self, components: dict[str, torch.Tensor]) -> torch.Tensor:

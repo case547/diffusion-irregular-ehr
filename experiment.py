@@ -185,7 +185,7 @@ if __name__ == "__main__":
             run.define_metric("pretrain_aux/*", step_metric="pretrain_aux/step")
 
             propnet = None
-            if model_cls is DiffPO or cfg.diffusion.use_propnet:
+            if model_cls is DiffPO:
                 propnet = _fit_propnet(
                     rep_cfg,
                     train_ds,

@@ -18,7 +18,7 @@ class DiffusionConfig(BaseModel):
     hidden_dim: int
     num_blocks: int
     clip_denoised: bool = False
-    use_propnet: bool = False
+    use_ipw: bool = False
     cf_anchor_weight: float = 0.0
 
 
