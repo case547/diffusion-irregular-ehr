@@ -51,6 +51,11 @@ def run_condition(
         train_aux_outcome(
             model.aux_outcome, train_loader, val_loader, cfg, device, log_fn=pretrain_log_fn
         )
+        # Freeze: aux_outcome depends only on (x, a, y), so it has nothing to gain from
+        # continued joint training. I also saw that validation log_ry degrade slightly
+        # while training log_ry improves (mild overfitting) if left unfrozen.
+        for p in model.aux_outcome.parameters():
+            p.requires_grad_(False)
 
     _train_loop(model, train_loader, val_loader, cfg, device, run_id, log_fn, propnet)
 

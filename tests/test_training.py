@@ -185,9 +185,14 @@ def test_train_aux_outcome_early_stopping_fires():
 
     epochs_logged = []
     train_aux_outcome(
-        aux, train_loader, val_loader, cfg, device,
+        aux,
+        train_loader,
+        val_loader,
+        cfg,
+        device,
         log_fn=lambda d, step: epochs_logged.append(step),
-        patience=1, min_epochs=1,
+        patience=1,
+        min_epochs=1,
     )
     assert len(epochs_logged) < 50, "training ran to completion instead of stopping early"
 
@@ -213,9 +218,14 @@ def test_train_aux_outcome_restores_best_state():
     val_losses = []
 
     train_aux_outcome(
-        aux, train_loader, val_loader, cfg, device,
+        aux,
+        train_loader,
+        val_loader,
+        cfg,
+        device,
         log_fn=lambda d, step: val_losses.append(d["pretrain_aux/val_nll"]),
-        patience=2, min_epochs=1,
+        patience=2,
+        min_epochs=1,
     )
     best_val_loss_seen = min(val_losses)
 
