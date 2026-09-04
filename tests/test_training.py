@@ -37,6 +37,23 @@ def _loader(n: int = 64, f: int = 5, batch_size: int = 16):
     return DataLoader(ds, batch_size=batch_size, shuffle=False)
 
 
+def _install_ema_capture_hook(captured: dict) -> None:
+    """Monkeypatch ema_pytorch.EMA (as imported into train.py) so the test can grab
+    the actual instances _train_loop constructs, without _train_loop needing to
+    return or expose them itself."""
+    import train
+
+    original_ema = train.EMA
+
+    class _CapturingEMA(original_ema):
+        def __init__(self, model, **kwargs):
+            super().__init__(model, **kwargs)
+            key = "ema_a_decoder" if "ema_a_decoder" not in captured else "ema_encoder"
+            captured[key] = self
+
+    train.EMA = _CapturingEMA
+
+
 def test_one_training_step():
     torch.manual_seed(0)
     np.random.seed(0)
@@ -269,3 +286,79 @@ def test_train_loop_passes_current_epoch_to_compute_loss():
     # own calls each epoch -- every training-batch call for epoch e must report e.
     training_epochs_seen = sorted(set(seen_epochs))
     assert training_epochs_seen == [0, 1, 2]
+
+
+def test_train_loop_builds_and_updates_ema_when_ipw_enabled():
+    """ema_a_decoder/ema_encoder must exist as EMA-wrapped copies of the live modules
+    and their internal step counter must have advanced once per training batch."""
+    from ema_pytorch import EMA
+
+    torch.manual_seed(4)
+    np.random.seed(4)
+    n, batch_size = 32, 16
+    epochs = 2
+    loader = _loader(n=n, batch_size=batch_size)
+    cfg = Config(
+        model=MODEL_CFG,
+        diffusion=DiffusionConfig(
+            num_steps=10,
+            beta_start=0.0001,
+            beta_end=0.02,
+            schedule="quad",
+            embedding_dim=16,
+            block_dim=16,
+            hidden_dim=32,
+            num_blocks=2,
+            use_ipw=True,
+            ipw_ramp_start=1,
+            ipw_ramp_end=2,
+            ipw_ema_decay=0.9,
+        ),
+        train=TrainConfig(
+            epochs=epochs, batch_size=batch_size, lr=1e-3, seed=4, K=2, checkpoint_dir="/tmp"
+        ),
+        data=DataConfig(path="data/ihdp", replication=1, train_ratio=0.7, test_ratio=0.15),
+    )
+    model = HybridModel(cfg.model, cfg.diffusion)
+    device = torch.device("cpu")
+
+    captured: dict = {}
+    _install_ema_capture_hook(captured)  # see Step 3 -- test-only introspection helper
+
+    from train import _train_loop
+
+    _train_loop(model, loader, loader, cfg, device, "pytest_ema_run")
+
+    assert isinstance(captured.get("ema_a_decoder"), EMA)
+    assert isinstance(captured.get("ema_encoder"), EMA)
+    n_batches_per_epoch = n // batch_size  # 2
+    expected_steps = n_batches_per_epoch * epochs  # 4
+    assert captured["ema_a_decoder"].step.item() == expected_steps
+    assert captured["ema_encoder"].step.item() == expected_steps
+
+
+def test_train_loop_skips_ema_when_ipw_disabled():
+    """use_ipw=False (the default) must not construct any EMA objects at all."""
+    torch.manual_seed(5)
+    np.random.seed(5)
+    loader = _loader(n=32, batch_size=16)
+    model = HybridModel(MODEL_CFG, DIFF_CFG)  # use_ipw defaults to False
+    cfg = Config(
+        model=MODEL_CFG,
+        diffusion=DIFF_CFG,
+        train=TrainConfig(
+            epochs=1, batch_size=16, lr=1e-3, seed=5, K=2, checkpoint_dir="/tmp"
+        ),
+        data=DataConfig(path="data/ihdp", replication=1, train_ratio=0.7, test_ratio=0.15),
+    )
+    device = torch.device("cpu")
+
+    captured: dict = {}
+    _install_ema_capture_hook(captured)
+
+    from train import _train_loop
+
+    _train_loop(model, loader, loader, cfg, device, "pytest_no_ema_run")
+
+    assert captured.get("ema_a_decoder") is None
+    assert captured.get("ema_encoder") is None

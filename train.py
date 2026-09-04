@@ -7,13 +7,14 @@ from collections.abc import Callable
 from pathlib import Path
 
 import torch
+from ema_pytorch import EMA
 from torch.optim import Adam
 from torch.utils.data import DataLoader
 
 from src.auxiliary import AuxOutcome
 from src.config import Config
 from src.metrics import coverage, pehe, rmse, wasserstein
-from src.model import _DiffusionBase
+from src.model import HybridModel, _DiffusionBase
 from src.propensity import PropensityNet
 
 logger = logging.getLogger(__name__)
@@ -153,6 +154,21 @@ def _train_loop(
     log_fn:
         optional callable(log_dict: dict, step: int) -- called each epoch for wandb logging.
     """
+    use_ipw = isinstance(model, HybridModel) and cfg.diffusion.use_ipw
+
+    ema_a_decoder: EMA | None = None
+    ema_encoder: EMA | None = None
+    if use_ipw:
+        steps_per_epoch = len(train_loader)
+        ema_kwargs = dict(
+            beta=cfg.diffusion.ipw_ema_decay,
+            min_value=cfg.diffusion.ipw_ema_decay,
+            update_after_step=cfg.diffusion.ipw_ramp_start * steps_per_epoch,
+            update_every=1,
+        )
+        ema_a_decoder = EMA(model.a_decoder, **ema_kwargs)
+        ema_encoder = EMA(model.encoder, **ema_kwargs)
+
     optimizer = Adam(model.parameters(), lr=cfg.train.lr, weight_decay=1e-6)
     p0, p1, p2, p3 = (int(f * cfg.train.epochs) for f in (0.25, 0.50, 0.75, 0.90))
     lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(
@@ -175,6 +191,10 @@ def _train_loop(
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
+
+            if use_ipw:
+                ema_a_decoder.update()
+                ema_encoder.update()
 
             for k, v in comps.items():
                 epoch_losses[k] += v.item()
