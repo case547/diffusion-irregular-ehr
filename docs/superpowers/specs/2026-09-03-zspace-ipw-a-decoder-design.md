@@ -130,7 +130,7 @@ Given trimming (step 4) already hard-bounds the worst-case weight magnitude rega
 
 ### 9. Observability: ESS
 
-$\text{ESS} = (\sum_i w_{\text{eff},i})^2 / \sum_i w_{\text{eff},i}^2$, logged (`ESS` and `ESS/B`) per epoch to wandb. Purely informational in this design — quantifies whether a batch's nominal size is being effectively eroded by a few large weights; does not feed back into any of the mechanisms above (percentile-based or ESS-driven adaptive clamping was considered and deferred — see below).
+$\text{ESS} = (\sum_i w_{\text{eff},i})^2 / \sum_i w_{\text{eff},i}^2$, logged (`ipw/ess` and `ipw/ess_frac`) per epoch to wandb. Purely informational in this design — quantifies whether a batch's nominal size is being effectively eroded by a few large weights; does not feed back into any of the mechanisms above (percentile-based or ESS-driven adaptive clamping was considered and deferred — see below).
 
 ### 10. Observability: calibration diagnostic
 
@@ -139,7 +139,12 @@ Logged per epoch the way `PropensityNet.fit` already logs train/val loss (`src/p
 ```python
 def calibration_diagnostic(p_hat: torch.Tensor, a: torch.Tensor, n_bins: int = 10) -> dict[str, float]:
     order = torch.argsort(p_hat)
-    bins = torch.chunk(order, n_bins)
+    # tensor_split (not chunk): chunk computes a fixed chunk_size = ceil(n/n_bins) and
+    # then however many of those fit, which silently yields fewer than n_bins bins
+    # whenever n_bins doesn't evenly divide n (e.g. n=32, n_bins=10 -> 8 bins, not 10).
+    # tensor_split always returns exactly n_bins bins for n >= n_bins, spreading the
+    # remainder across the first bins -- the correct primitive for quantile bins.
+    bins = torch.tensor_split(order, n_bins)
     out = {}
     errs = []
     for i, idx in enumerate(bins):
@@ -151,7 +156,7 @@ def calibration_diagnostic(p_hat: torch.Tensor, a: torch.Tensor, n_bins: int = 1
     return out
 ```
 
-Computed once per epoch from `p_hat`/`a` aggregated across the full training set (not per-batch — at `batch_size=256` a single batch split ten ways leaves too few subjects per bin to read anything from; aggregated over ~690 training subjects each bin holds ~69). Reuses the same `p_hat` already computed in step 3 for that epoch's weighting, so this is close to free. `calib_mae` is the single scalar worth watching over training; the per-bin values are for occasionally inspecting the actual reliability curve, not for driving any decision automatically.
+Computed once per epoch from `p_hat`/`a` aggregated across the full training set (not per-batch — at `batch_size=256` a single batch split ten ways leaves too few subjects per bin to read anything from; aggregated over ~690 training subjects each bin holds ~69). **Not free**: this is a *separate* full forward pass over the entire training set with `ipw_z_samples` MC draws per batch, run every epoch it fires — it does not reuse the per-batch `p_hat` values already computed in step 3 for that epoch's weighting (those are snapshots taken at different EMA states across the epoch, not a single coherent set suitable for one calibration curve). At production scale this adds hundreds of extra forward passes over a full run. It also consumes global RNG each epoch (the multi-sample `z` draws inside `_compute_phat`) — a real, non-obvious side effect: **turning diagnostics off would change training trajectories** under `use_ipw=True`, since it shifts every subsequent RNG-dependent draw in the run. `calib_mae` is the single scalar worth watching over training; the per-bin values are for occasionally inspecting the actual reliability curve, not for driving any decision automatically.
 
 Together with ESS, this is what actually tells you whether burn-in was long enough, whether EMA is helping, or whether `ipw_clip_prop` needs adjusting — none of which is otherwise directly observable from downstream PEHE/RMSE.
 
@@ -179,7 +184,7 @@ class DiffusionConfig(BaseModel):
     ttur_factor: float = 1.0                  # a_decoder LR multiplier from ipw_ramp_start onward
 ```
 
-`use_ipw: False` short-circuits all nine steps above entirely — `compute_loss` falls straight back to today's unweighted `diffusion_loss` formula, and none of the other six fields are read. They only need valid (non-zero-division) values once `use_ipw: True`; their listed defaults are inert placeholders under the gate, not defaults meant to be used as-is with `use_ipw: True`.
+`use_ipw: False` short-circuits all nine steps above entirely — `compute_loss` falls straight back to today's unweighted `diffusion_loss` formula. This is true for six of the other seven fields, which are only read once `use_ipw: True`; they only need valid (non-zero-division) values in that case, and their listed defaults are inert placeholders under the gate, not defaults meant to be used as-is with `use_ipw: True`. **`a_decoder_label_smoothing` is the exception**: it is read and applied in `HybridModel.compute_loss`'s `log_pa` computation unconditionally, regardless of `use_ipw`'s value — harmless at its `0.0` default, and arguably the better design, since smoothing `a_decoder`'s own training target is independently useful even without IPW active.
 
 ---
 

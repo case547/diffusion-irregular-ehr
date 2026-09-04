@@ -8,6 +8,7 @@ import torch
 from torch.optim import Adam
 from torch.utils.data import DataLoader
 
+import src.model as model_module
 from src.auxiliary import AuxOutcome
 from src.config import Config, DataConfig, DiffusionConfig, ModelConfig, TrainConfig
 from src.data import CausalDataset
@@ -545,3 +546,96 @@ def test_train_loop_skips_ipw_diagnostics_when_use_ipw_false():
     )
 
     assert not any(k.startswith("ipw/") for _, d in logged for k in d)
+
+
+def test_use_ipw_true_changes_trained_weights_vs_false(tmp_path):
+    """Full end-to-end regression test that use_ipw=True is NOT a silent no-op: two
+    otherwise-identical _train_loop runs (same seed immediately before each model's
+    construction, same loader, same architecture/hyperparameters) -- one with
+    use_ipw=True (ramp active for nearly the whole run) and one with use_ipw=False --
+    must end with DIFFERENT trained weights.
+
+    A bare state_dict inequality alone would NOT be fully discriminating here: the
+    use_ipw=True path also consumes extra global RNG every epoch (multi-sample z
+    draws in _compute_phat, both from in-loop weighting AND from _log_ipw_diagnostics'
+    full-train-set pass -- see spec doc corrections), so the two runs' weights would
+    likely diverge even if the IPW weight were somehow never threaded into the loss.
+    To rule that out, this also spies on src.model.zspace_ipw_weight (the model's own
+    module-level import, used only inside HybridModel.compute_loss -- distinct from
+    train.py's separate import of the same function used by _log_ipw_diagnostics) and
+    asserts it was actually called, at least once, with a non-trivial (non-all-ones)
+    weight vector during the use_ipw=True run. That's the assertion a future refactor
+    silently severing EMA/weight threading into compute_loss would actually break.
+    """
+    from train import _train_loop
+
+    n, batch_size, epochs = 64, 16, 4
+    loader = _loader(n=n, batch_size=batch_size)
+
+    def _run(use_ipw: bool, run_id: str) -> HybridModel:
+        torch.manual_seed(42)
+        diff_cfg = DiffusionConfig(
+            num_steps=10,
+            beta_start=0.0001,
+            beta_end=0.02,
+            schedule="quad",
+            embedding_dim=16,
+            block_dim=16,
+            hidden_dim=32,
+            num_blocks=2,
+            use_ipw=use_ipw,
+            ipw_ramp_start=0,
+            ipw_ramp_end=1,
+            ipw_ema_decay=0.9,
+            ipw_z_samples=2,
+        )
+        model = HybridModel(MODEL_CFG, diff_cfg)
+        cfg = Config(
+            model=MODEL_CFG,
+            diffusion=diff_cfg,
+            train=TrainConfig(
+                epochs=epochs,
+                batch_size=batch_size,
+                lr=1e-3,
+                seed=42,
+                K=2,
+                checkpoint_dir=str(tmp_path),
+            ),
+            data=DataConfig(path="data/ihdp", replication=1, train_ratio=0.7, test_ratio=0.15),
+        )
+        device = torch.device("cpu")
+        _train_loop(model, loader, loader, cfg, device, run_id)
+        return model
+
+    original_weight_fn = model_module.zspace_ipw_weight
+    weight_calls: list[torch.Tensor] = []
+
+    def weight_spy(p_hat, a, clip_prop):
+        w = original_weight_fn(p_hat, a, clip_prop)
+        weight_calls.append(w.detach().clone())
+        return w
+
+    model_module.zspace_ipw_weight = weight_spy
+    try:
+        model_true = _run(True, "ipw_true_run")
+    finally:
+        model_module.zspace_ipw_weight = original_weight_fn
+
+    model_false = _run(False, "ipw_false_run")
+
+    sd_true = torch.cat([p.flatten() for p in model_true.state_dict().values()])
+    sd_false = torch.cat([p.flatten() for p in model_false.state_dict().values()])
+    assert not torch.allclose(sd_true, sd_false, atol=1e-6), (
+        "use_ipw=True and use_ipw=False produced identical trained weights -- the "
+        "mechanism is a silent no-op"
+    )
+
+    assert len(weight_calls) > 0, (
+        "src.model.zspace_ipw_weight was never called from compute_loss during the "
+        "use_ipw=True run -- EMA/weight threading may have been silently severed"
+    )
+    assert any(not torch.allclose(w, torch.ones_like(w)) for w in weight_calls), (
+        "zspace_ipw_weight was called but never produced a non-trivial weight vector -- "
+        "the state_dict divergence above could be explained by RNG consumption alone, "
+        "not by the weighting actually reaching the loss"
+    )

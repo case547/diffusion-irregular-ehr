@@ -20,6 +20,13 @@ from src.zspace_ipw import calibration_diagnostic, effective_sample_size, zspace
 
 logger = logging.getLogger(__name__)
 
+# Index of a_decoder's TTUR param group within _train_loop's optimizer, once
+# ipw_model is not None. Hoisted to module level (rather than assigned inside the
+# `if ipw_model is not None:` block that builds the optimizer) so basedpyright's
+# definite-assignment analysis doesn't flag it as possibly-unbound at its use site
+# several `if` blocks later, which it cannot correlate with that first block's guard.
+_A_DECODER_GROUP = 1
+
 
 def calculate_val_loss(
     model: _DiffusionBase,
@@ -59,12 +66,19 @@ def _log_ipw_diagnostics(
     device: torch.device,
     ema_a_decoder: EMA,
     ema_encoder: EMA,
-    cfg: Config,
 ) -> dict[str, float]:
     """Aggregate pi_hat/a over the FULL training set and compute ESS & calibration.
 
-    This isn't done per-batch as there would be too few subjects per calibration bin.
+    This isn't done per-batch as there would be too few subjects per calibration bin
     otherwise. No-grad, eval mode; purely observational, does not affect training.
+
+    NOTE: the `ipw/*` row logged at step S reflects diagnostics computed from the EMA
+    state as of the END of epoch S-1 (i.e. one epoch "behind" what `train/*` at the
+    same step describes) -- `_train_loop` calls this after that epoch's EMA `.update()`
+    calls but the values summarise the pass just completed. Also, the logged `ipw/ess`
+    is computed from the un-ramped zspace_ipw_weight output below, not the actual
+    ramp_weight-adjusted weights driving that epoch's loss -- so during ramp-up
+    epochs, logged ESS is lower than the true in-loss ESS.
     """
     was_training = model.training
     model.eval()
@@ -82,7 +96,10 @@ def _log_ipw_diagnostics(
 
     pi_hat_all = torch.cat(all_pi_hat)
     a_all = torch.cat(all_a)
-    w = zspace_ipw_weight(pi_hat_all, a_all, cfg.diffusion.ipw_clip_prop)
+    # Read the clip threshold off the model itself (single source of truth) rather
+    # than separately from cfg.diffusion.ipw_clip_prop -- the two happen to always
+    # agree in practice but weren't enforced to.
+    w = zspace_ipw_weight(pi_hat_all, a_all, model._ipw_clip_prop)
     ess = effective_sample_size(w)
 
     out = {"ess": ess, "ess_frac": ess / len(w)}
@@ -196,14 +213,15 @@ def _train_loop(
     log_fn:
         optional callable(log_dict: dict, step: int) -- called each epoch for wandb logging.
     """
-    use_ipw = isinstance(model, HybridModel) and cfg.diffusion.use_ipw
-    use_two_lrs = use_ipw and cfg.diffusion.ttur_factor != 1.0
+    ipw_model: HybridModel | None = (
+        model if isinstance(model, HybridModel) and cfg.diffusion.use_ipw else None
+    )
 
     # EMA for a_decoder and encoder, if using z-space IPW. Note that the EMA is only
     # used for inference in the loss computation, not for training the a_decoder itself.
     ema_a_decoder: EMA | None = None
     ema_encoder: EMA | None = None
-    if use_ipw:
+    if ipw_model is not None:
         steps_per_epoch = len(train_loader)
         ema_kwargs = dict(
             beta=cfg.diffusion.ipw_ema_decay,
@@ -211,23 +229,23 @@ def _train_loop(
             update_after_step=cfg.diffusion.ipw_ramp_start * steps_per_epoch,
             update_every=1,
         )
-        ema_a_decoder = EMA(model.a_decoder, **ema_kwargs)
-        ema_encoder = EMA(model.encoder, **ema_kwargs)
+        ema_a_decoder = EMA(ipw_model.a_decoder, **ema_kwargs)
+        ema_encoder = EMA(ipw_model.encoder, **ema_kwargs)
 
     # If using z-space IPW with TTUR, split the optimiser into two groups: one for the
     # a_decoder (group 1) and one for all other parameters (group 0). The a_decoder's
     # LR is multiplied by ttur_factor after ipw_ramp_start.
+    use_two_lrs = ipw_model is not None and cfg.diffusion.ttur_factor != 1.0
     if use_two_lrs:
-        a_decoder_param_ids = {id(p) for p in model.a_decoder.parameters()}
+        a_decoder_param_ids = {id(p) for p in ipw_model.a_decoder.parameters()}
         other_params = [p for p in model.parameters() if id(p) not in a_decoder_param_ids]
         optimizer = Adam(
             [
                 {"params": other_params, "lr": cfg.train.lr},
-                {"params": list(model.a_decoder.parameters()), "lr": cfg.train.lr},
+                {"params": list(ipw_model.a_decoder.parameters()), "lr": cfg.train.lr},
             ],
             weight_decay=1e-6,
         )
-        A_DECODER_GROUP = 1
     else:
         optimizer = Adam(model.parameters(), lr=cfg.train.lr, weight_decay=1e-6)
 
@@ -255,7 +273,7 @@ def _train_loop(
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
 
-            if use_ipw:
+            if ipw_model is not None and ema_a_decoder is not None and ema_encoder is not None:
                 ema_a_decoder.update()
                 ema_encoder.update()
 
@@ -267,23 +285,26 @@ def _train_loop(
         lr_scheduler.step()
 
         if use_two_lrs and (epoch + 1) >= cfg.diffusion.ipw_ramp_start:
-            # Re-derive from group 0's current (post-MultiStepLR-decay) LR each epoch,
-            # rather than multiplying group 1's LR in place -- both groups share the
-            # same base LR and decay schedule, so group 0's current value IS what
-            # group 1's LR would be without TTUR; this avoids compounding the factor
-            # across epochs.
-            optimizer.param_groups[A_DECODER_GROUP]["lr"] = (
+            # Re-derive from group 0's current (post-MultiStepLR-decay) LR each epoch
+            # to avoid compounding the factor across epochs
+            optimizer.param_groups[_A_DECODER_GROUP]["lr"] = (
                 optimizer.param_groups[0]["lr"] * cfg.diffusion.ttur_factor
             )
 
-        val_loss_components = calculate_val_loss(
-            model, val_loader, device, propnet, epoch, ema_a_decoder, ema_encoder
-        )
+        # ema_a_decoder/ema_encoder deliberately NOT passed here -- val/diffusion_loss
+        # stays always-unweighted so it's a stable, directly-comparable monitoring
+        # metric across use_ipw=True vs use_ipw=False runs
+        val_loss_components = calculate_val_loss(model, val_loader, device, propnet, epoch)
 
         ipw_diagnostic: dict[str, float] = {}
-        if use_ipw and (epoch + 1) >= cfg.diffusion.ipw_ramp_start:
+        if (
+            ipw_model is not None
+            and ema_a_decoder is not None
+            and ema_encoder is not None
+            and (epoch + 1) >= cfg.diffusion.ipw_ramp_start
+        ):
             ipw_diagnostic = _log_ipw_diagnostics(
-                model, train_loader, device, ema_a_decoder, ema_encoder, cfg
+                ipw_model, train_loader, device, ema_a_decoder, ema_encoder
             )
 
         if log_fn is not None:
