@@ -14,7 +14,7 @@ diffusion:
   hidden_dim: 32     # output head width (output_projection1/2, y0/y1 layers); contracts like DiffPO (cond_dim -> hidden_dim)
   num_blocks: 4      # number of residual blocks
   clip_denoised: True  # whether to clip denoised predictions during reverse diffusion
-  use_propnet: False  # whether to use PropensityNet to weight HybridModel's diffusion loss
+  use_ipw: False  # something new is coming...
   cf_anchor_weight: 1  # soft-mask weight for counterfactual slot, anchored to pre-trained AuxOutcome's per-subject prediction. HybridModel only.
 
 train:

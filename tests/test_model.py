@@ -142,26 +142,44 @@ def test_cf_anchor_uses_aux_outcome_not_y_cf():
 
 
 def test_cf_anchor_softens_gradient_mask_in_compute_loss():
-    """Spy on the real calculate_diffusion_loss call -- verifies the ACTUAL mask tensor
-    reaching it, not just a standalone recomputation of the formula."""
+    """Spy on _noise_targets (for eps/factual_mask) and the denoiser (for eps_pred) --
+    verifies the ACTUAL tensors reaching compute_loss's diffusion_loss computation, not
+    just a standalone recomputation of the formula."""
     cfg = _anchor_cfg(cf_anchor_weight=0.15)
     model = HybridModel(MODEL_CFG, cfg)
     x, a, y_fac, y_cf = _batch()
     a = torch.tensor([0.0, 1.0, 0.0, 1.0])
 
     captured = {}
-    original = model.calculate_diffusion_loss
+    original_noise_targets = model._noise_targets
 
-    def spy(eps, eps_pred, gradient_mask, x_arg, a_arg, propnet):
-        captured["gradient_mask"] = gradient_mask
-        return original(eps, eps_pred, gradient_mask, x_arg, a_arg, propnet)
+    def noise_spy(batch_size, device, a_arg, y_fac_arg, y_cf_arg):
+        noisy_y, tau, eps, factual_mask = original_noise_targets(
+            batch_size, device, a_arg, y_fac_arg, y_cf_arg
+        )
+        captured["eps"] = eps
+        captured["factual_mask"] = factual_mask
+        return noisy_y, tau, eps, factual_mask
 
-    model.calculate_diffusion_loss = spy
-    model.compute_loss(x, a, y_fac, y_cf)
+    model._noise_targets = noise_spy
 
-    factual_mask = torch.stack([1 - a, a], dim=1)
-    expected = factual_mask + 0.15 * (1.0 - factual_mask)
-    assert torch.allclose(captured["gradient_mask"], expected)
+    original_denoiser_forward = model.denoiser.forward
+
+    def denoiser_spy(*args, **kwargs):
+        eps_pred = original_denoiser_forward(*args, **kwargs)
+        captured["eps_pred"] = eps_pred
+        return eps_pred
+
+    model.denoiser.forward = denoiser_spy
+
+    comps = model.compute_loss(x, a, y_fac, y_cf)
+
+    factual_mask = captured["factual_mask"]
+    expected_mask = factual_mask + 0.15 * (1.0 - factual_mask)
+    expected_loss = (
+        (((captured["eps_pred"] - captured["eps"]) * expected_mask) ** 2).sum(dim=1).mean()
+    )
+    assert torch.allclose(comps["diffusion_loss"], expected_loss)
 
 
 def test_cf_anchor_detached_from_aux_outcome():
