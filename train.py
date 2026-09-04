@@ -159,7 +159,10 @@ def _train_loop(
         optional callable(log_dict: dict, step: int) -- called each epoch for wandb logging.
     """
     use_ipw = isinstance(model, HybridModel) and cfg.diffusion.use_ipw
+    use_two_lrs = use_ipw and cfg.diffusion.ttur_factor != 1.0
 
+    # EMA for a_decoder and encoder, if using z-space IPW. Note that the EMA is only
+    # used for inference in the loss computation, not for training the a_decoder itself.
     ema_a_decoder: EMA | None = None
     ema_encoder: EMA | None = None
     if use_ipw:
@@ -173,7 +176,23 @@ def _train_loop(
         ema_a_decoder = EMA(model.a_decoder, **ema_kwargs)
         ema_encoder = EMA(model.encoder, **ema_kwargs)
 
-    optimizer = Adam(model.parameters(), lr=cfg.train.lr, weight_decay=1e-6)
+    # If using z-space IPW with TTUR, split the optimiser into two groups: one for the
+    # a_decoder (group 1) and one for all other parameters (group 0). The a_decoder's
+    # LR is multiplied by ttur_factor after ipw_ramp_start.
+    if use_two_lrs:
+        a_decoder_param_ids = {id(p) for p in model.a_decoder.parameters()}
+        other_params = [p for p in model.parameters() if id(p) not in a_decoder_param_ids]
+        optimizer = Adam(
+            [
+                {"params": other_params, "lr": cfg.train.lr},
+                {"params": list(model.a_decoder.parameters()), "lr": cfg.train.lr},
+            ],
+            weight_decay=1e-6,
+        )
+        A_DECODER_GROUP = 1
+    else:
+        optimizer = Adam(model.parameters(), lr=cfg.train.lr, weight_decay=1e-6)
+
     p0, p1, p2, p3 = (int(f * cfg.train.epochs) for f in (0.25, 0.50, 0.75, 0.90))
     lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(
         optimizer, milestones=[p0, p1, p2, p3], gamma=0.1
@@ -208,6 +227,17 @@ def _train_loop(
             n_batches += 1
 
         lr_scheduler.step()
+
+        if use_two_lrs and (epoch + 1) >= cfg.diffusion.ipw_ramp_start:
+            # Re-derive from group 0's current (post-MultiStepLR-decay) LR each epoch,
+            # rather than multiplying group 1's LR in place -- both groups share the
+            # same base LR and decay schedule, so group 0's current value IS what
+            # group 1's LR would be without TTUR; this avoids compounding the factor
+            # across epochs.
+            optimizer.param_groups[A_DECODER_GROUP]["lr"] = (
+                optimizer.param_groups[0]["lr"] * cfg.diffusion.ttur_factor
+            )
+
         val_comps = calculate_val_loss(
             model, val_loader, device, propnet, epoch, ema_a_decoder, ema_encoder
         )
