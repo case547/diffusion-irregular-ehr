@@ -185,6 +185,7 @@ class HybridModel(_DiffusionBase):
         )
         self._init_schedule(diffusion_cfg)
         self._cf_anchor_weight = diffusion_cfg.cf_anchor_weight
+        self._a_decoder_label_smoothing = diffusion_cfg.a_decoder_label_smoothing
 
     def _apply_cf_anchor(
         self, x: torch.Tensor, a: torch.Tensor, y_cf: torch.Tensor
@@ -223,8 +224,13 @@ class HybridModel(_DiffusionBase):
         # Encode -- reparameterised; z retains grad for full end-to-end training
         z, mu, sigma = self.encoder.rsample(x, a, y_fac)
 
+        # x decoding
         log_px = self.x_decoder.log_prob(z, x).mean()
-        log_pa = self.a_decoder.log_prob(z, a).mean()
+        # a decoding, with label smoothing to avoid degenerate logit saturation
+        eps_smooth = self._a_decoder_label_smoothing
+        a_smooth = a * (1.0 - 2.0 * eps_smooth) + eps_smooth
+        log_pa = self.a_decoder.log_prob(z, a_smooth).mean()
+        # KL divergence term KL[r_φ(z|x,a,y) ‖ N(0,I)]
         kl = 0.5 * (mu.pow(2) + sigma.pow(2) - 2.0 * sigma.log() - 1.0).sum(-1).mean()
 
         cf_target, anchor_active = self._apply_cf_anchor(x, a, y_cf)
