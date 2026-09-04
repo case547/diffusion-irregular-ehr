@@ -24,6 +24,7 @@ def calculate_val_loss(
     loader: DataLoader,
     device: torch.device,
     propnet: PropensityNet | None = None,
+    epoch: int = 0,
 ) -> dict[str, float]:
     """Mean of all loss components on loader. No sampling -- cheap forward pass only."""
     model.eval()
@@ -36,7 +37,7 @@ def calculate_val_loss(
             a = batch["a"].to(device)
             y = batch["y"].to(device)
             y_cf = batch["y_cf"].to(device)
-            comps = model.compute_loss(x, a, y, y_cf, propnet)
+            comps = model.compute_loss(x, a, y, y_cf, propnet, epoch)
 
             for k, v in comps.items():
                 totals[k] += v.item()
@@ -169,7 +170,7 @@ def _train_loop(
             y = batch["y"].to(device)
             y_cf = batch["y_cf"].to(device)
             optimizer.zero_grad()
-            comps = model.compute_loss(x, a, y, y_cf, propnet)
+            comps = model.compute_loss(x, a, y, y_cf, propnet, epoch)
             loss = model.total_loss(comps)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -181,7 +182,7 @@ def _train_loop(
             n_batches += 1
 
         lr_scheduler.step()
-        val_comps = calculate_val_loss(model, val_loader, device, propnet)
+        val_comps = calculate_val_loss(model, val_loader, device, propnet, epoch)
 
         if log_fn is not None:
             log = {f"train/{k}": v / n_batches for k, v in epoch_losses.items()}

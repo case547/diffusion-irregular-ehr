@@ -25,6 +25,7 @@ class _DiffusionBase(nn.Module, ABC):
         y_fac: torch.Tensor,
         y_cf: torch.Tensor,
         propnet: PropensityNet | None = None,
+        epoch: int = 0,
     ) -> dict[str, torch.Tensor]: ...
 
     @abstractmethod
@@ -210,6 +211,7 @@ class HybridModel(_DiffusionBase):
         y_fac: torch.Tensor,
         y_cf: torch.Tensor,
         propnet: PropensityNet | None = None,
+        epoch: int = 0,
     ) -> dict[str, torch.Tensor]:
         # propnet accepted only for call-site parity with train.py's polymorphic
         # model.compute_loss(x, a, y, y_cf, propnet) -- never used: an x-space propensity
@@ -306,6 +308,7 @@ class DiffPO(_DiffusionBase):
         y_fac: torch.Tensor,
         y_cf: torch.Tensor,
         propnet: PropensityNet | None = None,
+        epoch: int = 0,
     ) -> dict[str, torch.Tensor]:
         noisy_y, tau, eps, factual_mask = self._noise_targets(
             x.shape[0], x.device, a, y_fac, y_cf
