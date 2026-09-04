@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 import numpy as np
 import torch
 import torch.nn as nn
+from ema_pytorch import EMA
 
 from src.auxiliary import AuxOutcome
 from src.config import DiffusionConfig, ModelConfig
@@ -10,6 +11,7 @@ from src.decoders import ADecoder, XDecoder
 from src.denoiser import Denoiser
 from src.encoder import ZEncoder
 from src.propensity import PropensityNet
+from src.zspace_ipw import ramp_weight, zspace_ipw_weight
 
 
 class _DiffusionBase(nn.Module, ABC):
@@ -26,6 +28,8 @@ class _DiffusionBase(nn.Module, ABC):
         y_cf: torch.Tensor,
         propnet: PropensityNet | None = None,
         epoch: int = 0,
+        ema_a_decoder: EMA | None = None,
+        ema_encoder: EMA | None = None,
     ) -> dict[str, torch.Tensor]: ...
 
     @abstractmethod
@@ -171,10 +175,14 @@ class HybridModel(_DiffusionBase):
     def __init__(self, model_cfg: ModelConfig, diffusion_cfg: DiffusionConfig):
         super().__init__()
         m = model_cfg
+
+        # Encoder-decoder stack for z-space latent confounder model
         self.encoder = ZEncoder(m.feature_dim, m.latent_dim, m.hidden_dim, m.num_layers)
         self.x_decoder = XDecoder(m.latent_dim, m.feature_dim, m.hidden_dim, m.num_layers)
         self.a_decoder = ADecoder(m.latent_dim, m.hidden_dim, m.num_layers)
         self.aux_outcome = AuxOutcome(m.feature_dim, m.hidden_dim, m.num_layers)
+
+        # Diffusion denoiser for y-space potential outcome model, conditioned on z and a
         self.denoiser = Denoiser(
             latent_dim=m.latent_dim,
             block_dim=diffusion_cfg.block_dim,
@@ -185,7 +193,18 @@ class HybridModel(_DiffusionBase):
         )
         self._init_schedule(diffusion_cfg)
         self._cf_anchor_weight = diffusion_cfg.cf_anchor_weight
+
+        # IPW configuration
         self._a_decoder_label_smoothing = diffusion_cfg.a_decoder_label_smoothing
+        self._use_ipw = diffusion_cfg.use_ipw
+        self._ipw_ramp_start = diffusion_cfg.ipw_ramp_start
+        self._ipw_ramp_end = diffusion_cfg.ipw_ramp_end
+        self._ipw_clip_prop = diffusion_cfg.ipw_clip_prop
+        self._ipw_z_samples = diffusion_cfg.ipw_z_samples
+        if self._use_ipw:
+            assert diffusion_cfg.ipw_ramp_end > diffusion_cfg.ipw_ramp_start, (
+                "ipw_ramp_end must be > ipw_ramp_start when use_ipw=True"
+            )
 
     def _apply_cf_anchor(
         self, x: torch.Tensor, a: torch.Tensor, y_cf: torch.Tensor
@@ -205,6 +224,31 @@ class HybridModel(_DiffusionBase):
             cf_target = self.aux_outcome.mean(x, 1.0 - a)
         return cf_target, True
 
+    def _compute_pi_hat(
+        self,
+        x: torch.Tensor,
+        a: torch.Tensor,
+        y_fac: torch.Tensor,
+        ema_encoder: EMA,
+        ema_a_decoder: EMA,
+    ) -> torch.Tensor:
+        """Multi-sample MC estimate of p_psi(a=1|z) via the EMA encoder + a_decoder.
+
+        Takes `self._ipw_z_samples` independent `z` draws from q(z|x,a,y_fac) and averages
+        `sigmoid(logits)` (not the logits themselves) using no_grad, eval-mode EMA models
+        so this never affects (or is affected by) the current step's gradient.
+
+        Returns (B,).
+        """
+        probs = []
+        for _ in range(self._ipw_z_samples):
+            mu, sigma = ema_encoder.forward_eval(x, a, y_fac)
+            z_m = mu + sigma * torch.randn_like(sigma)
+            logits_m = ema_a_decoder.forward_eval(z_m)
+            probs.append(torch.sigmoid(logits_m))
+
+        return torch.stack(probs).mean(dim=0)
+
     def compute_loss(
         self,
         x: torch.Tensor,
@@ -213,6 +257,8 @@ class HybridModel(_DiffusionBase):
         y_cf: torch.Tensor,
         propnet: PropensityNet | None = None,
         epoch: int = 0,
+        ema_a_decoder: EMA | None = None,
+        ema_encoder: EMA | None = None,
     ) -> dict[str, torch.Tensor]:
         # propnet accepted only for call-site parity with train.py's polymorphic
         # model.compute_loss(x, a, y, y_cf, propnet) -- never used: an x-space propensity
@@ -246,7 +292,20 @@ class HybridModel(_DiffusionBase):
             gradient_mask = factual_mask
 
         # Diffusion loss term E_z,τ,ε[‖ε - ε_θ(⋅)‖²]
-        diffusion_loss = (((eps_pred - eps) * gradient_mask) ** 2).sum(dim=1).mean()
+        per_sample = (((eps_pred - eps) * gradient_mask) ** 2).sum(dim=1)
+
+        if (
+            self._use_ipw
+            and ema_a_decoder is not None
+            and ema_encoder is not None
+            and epoch >= self._ipw_ramp_start
+        ):
+            pi_hat = self._compute_pi_hat(x, a, y_fac, ema_encoder, ema_a_decoder)
+            w = zspace_ipw_weight(pi_hat, a, self._ipw_clip_prop)
+            w_eff = ramp_weight(w, epoch, self._ipw_ramp_start, self._ipw_ramp_end)
+            diffusion_loss = (per_sample * w_eff).mean()
+        else:
+            diffusion_loss = per_sample.mean()
 
         log_ry = self.aux_outcome.log_prob(x, a, y_fac).mean()
 
@@ -315,7 +374,17 @@ class DiffPO(_DiffusionBase):
         y_cf: torch.Tensor,
         propnet: PropensityNet | None = None,
         epoch: int = 0,
+        ema_a_decoder: EMA | None = None,
+        ema_encoder: EMA | None = None,
     ) -> dict[str, torch.Tensor]:
+        """Compute the diffusion loss, optionally weighted by IPW from a `PropensityNet`,
+        which should be frozen.
+
+        `epoch`, `ema_a_decoder`, and `ema_encoder` are accepted only for call-site parity with
+        `train.py`'s polymorphic `model.compute_loss(...)` -- `DiffPO` has no `a_decoder` or
+        `encoder` to run z-space IPW against, so these are unused.
+        """
+
         noisy_y, tau, eps, factual_mask = self._noise_targets(
             x.shape[0], x.device, a, y_fac, y_cf
         )
