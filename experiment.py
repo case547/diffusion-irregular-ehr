@@ -182,6 +182,7 @@ if __name__ == "__main__":
             run.define_metric("propnet/*", step_metric="propnet/step")
             run.define_metric("train/*", step_metric="train/step")
             run.define_metric("val/*", step_metric="train/step")
+            run.define_metric("ipw/*", step_metric="train/step")
             run.define_metric("pretrain_aux/*", step_metric="pretrain_aux/step")
 
             propnet = None

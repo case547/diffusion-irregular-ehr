@@ -16,6 +16,7 @@ from src.config import Config
 from src.metrics import coverage, pehe, rmse, wasserstein
 from src.model import HybridModel, _DiffusionBase
 from src.propensity import PropensityNet
+from src.zspace_ipw import calibration_diagnostic, effective_sample_size, zspace_ipw_weight
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,43 @@ def calculate_val_loss(
             n += 1
 
     return {k: v / n for k, v in totals.items()}
+
+
+def _log_ipw_diagnostics(
+    model: HybridModel,
+    train_loader: DataLoader,
+    device: torch.device,
+    ema_a_decoder: EMA,
+    ema_encoder: EMA,
+    cfg: Config,
+) -> dict[str, float]:
+    """Aggregate pi_hat/a over the FULL training set and compute ESS & calibration.
+
+    This isn't done per-batch as there would be too few subjects per calibration bin.
+    otherwise. No-grad, eval mode; purely observational, does not affect training.
+    """
+    was_training = model.training
+    model.eval()
+    all_pi_hat, all_a = [], []
+    with torch.no_grad():
+        for batch in train_loader:
+            x = batch["x"].to(device)
+            a = batch["a"].to(device)
+            y = batch["y"].to(device)
+            pi_hat = model._compute_pi_hat(x, a, y, ema_encoder, ema_a_decoder)
+            all_pi_hat.append(pi_hat)
+            all_a.append(a)
+    if was_training:
+        model.train()
+
+    pi_hat_all = torch.cat(all_pi_hat)
+    a_all = torch.cat(all_a)
+    w = zspace_ipw_weight(pi_hat_all, a_all, cfg.diffusion.ipw_clip_prop)
+    ess = effective_sample_size(w)
+
+    out = {"ess": ess, "ess_frac": ess / len(w)}
+    out.update(calibration_diagnostic(pi_hat_all, a_all))
+    return out
 
 
 def evaluate(
@@ -209,10 +247,10 @@ def _train_loop(
             y = batch["y"].to(device)
             y_cf = batch["y_cf"].to(device)
             optimizer.zero_grad()
-            comps = model.compute_loss(
+            loss_components = model.compute_loss(
                 x, a, y, y_cf, propnet, epoch, ema_a_decoder, ema_encoder
             )
-            loss = model.total_loss(comps)
+            loss = model.total_loss(loss_components)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
@@ -221,7 +259,7 @@ def _train_loop(
                 ema_a_decoder.update()
                 ema_encoder.update()
 
-            for k, v in comps.items():
+            for k, v in loss_components.items():
                 epoch_losses[k] += v.item()
             epoch_losses["total_loss"] += loss.item()
             n_batches += 1
@@ -238,20 +276,27 @@ def _train_loop(
                 optimizer.param_groups[0]["lr"] * cfg.diffusion.ttur_factor
             )
 
-        val_comps = calculate_val_loss(
+        val_loss_components = calculate_val_loss(
             model, val_loader, device, propnet, epoch, ema_a_decoder, ema_encoder
         )
 
+        ipw_diagnostic: dict[str, float] = {}
+        if use_ipw and (epoch + 1) >= cfg.diffusion.ipw_ramp_start:
+            ipw_diagnostic = _log_ipw_diagnostics(
+                model, train_loader, device, ema_a_decoder, ema_encoder, cfg
+            )
+
         if log_fn is not None:
             log = {f"train/{k}": v / n_batches for k, v in epoch_losses.items()}
-            log.update({f"val/{k}": v for k, v in val_comps.items()})
+            log.update({f"val/{k}": v for k, v in val_loss_components.items()})
+            log.update({f"ipw/{k}": v for k, v in ipw_diagnostic.items()})
             log_fn(log, epoch + 1)
 
-        val_loss = val_comps["total_loss"]
+        val_total_loss = val_loss_components["total_loss"]
         logger.info(
             f"Epoch {epoch + 1}:"
             f" train_elbo {epoch_losses['total_loss'] / n_batches:.4f},"
-            f" val_elbo {val_loss:.4f}"
+            f" val_elbo {val_total_loss:.4f}"
         )
 
     torch.save(
