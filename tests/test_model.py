@@ -6,7 +6,13 @@ from src.config import Config, DataConfig, DiffusionConfig, TrainConfig, VAEConf
 from src.model import HybridModel
 
 VAE_CFG = VAEConfig(
-    feature_dim=5, latent_dim=4, hidden_dim=16, num_layers=2, a_decoder_hidden_dim=5
+    feature_dim=5,
+    latent_dim=4,
+    hidden_dim=16,
+    encoder_num_layers=2,
+    decoder_num_layers=1,
+    aux_num_layers=1,
+    a_decoder_hidden_dim=5,
 )
 DIFF_CFG = DiffusionConfig(
     num_steps=10,
@@ -208,7 +214,9 @@ def test_a_decoder_label_smoothing_changes_log_pa_target():
         feature_dim=5,
         latent_dim=4,
         hidden_dim=16,
-        num_layers=2,
+        encoder_num_layers=2,
+        decoder_num_layers=1,
+        aux_num_layers=1,
         a_decoder_hidden_dim=5,
         a_decoder_label_smoothing=0.05,
     )

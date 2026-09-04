@@ -5,7 +5,13 @@ from src.model import DiffPO
 from src.propensity import PropensityNet
 
 VAE_CFG = VAEConfig(
-    feature_dim=5, latent_dim=4, hidden_dim=16, num_layers=2, a_decoder_hidden_dim=5
+    feature_dim=5,
+    latent_dim=4,
+    hidden_dim=16,
+    encoder_num_layers=2,
+    decoder_num_layers=1,
+    aux_num_layers=1,
+    a_decoder_hidden_dim=5,
 )
 DIFF_CFG = DiffusionConfig(
     num_steps=10,

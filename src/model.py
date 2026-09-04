@@ -177,10 +177,16 @@ class HybridModel(_DiffusionBase):
 
         # Encoder-decoder stack for z-space latent confounder model
         vc = vae_cfg
-        self.encoder = ZEncoder(vc.feature_dim, vc.latent_dim, vc.hidden_dim, vc.num_layers)
-        self.x_decoder = XDecoder(vc.latent_dim, vc.feature_dim, vc.hidden_dim, vc.num_layers)
-        self.a_decoder = ADecoder(vc.latent_dim, vc.a_decoder_hidden_dim, vc.num_layers)
-        self.aux_outcome = AuxOutcome(vc.feature_dim, vc.hidden_dim, vc.num_layers)
+        self.encoder = ZEncoder(
+            vc.feature_dim, vc.latent_dim, vc.hidden_dim, vc.encoder_num_layers
+        )
+        self.x_decoder = XDecoder(
+            vc.latent_dim, vc.feature_dim, vc.hidden_dim, vc.decoder_num_layers
+        )
+        self.a_decoder = ADecoder(
+            vc.latent_dim, vc.a_decoder_hidden_dim, vc.decoder_num_layers
+        )
+        self.aux_outcome = AuxOutcome(vc.feature_dim, vc.hidden_dim, vc.aux_num_layers)
 
         self._a_decoder_label_smoothing = vae_cfg.a_decoder_label_smoothing
 

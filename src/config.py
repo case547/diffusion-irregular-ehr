@@ -5,8 +5,10 @@ class VAEConfig(BaseModel):
     feature_dim: int
     latent_dim: int
     hidden_dim: int
+    encoder_num_layers: int
+    decoder_num_layers: int
+    aux_num_layers: int
     a_decoder_hidden_dim: int
-    num_layers: int
     a_decoder_label_smoothing: float = Field(default=0.0, ge=0.0, lt=0.5)
 
 

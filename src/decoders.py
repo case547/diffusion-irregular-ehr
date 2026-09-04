@@ -9,7 +9,7 @@ class XDecoder(nn.Module):
 
     def __init__(self, latent_dim: int, feature_dim: int, hidden_dim: int, num_layers: int):
         super().__init__()
-        sizes = [latent_dim] + [hidden_dim] * (num_layers - 1) + [feature_dim]
+        sizes = [latent_dim] + [hidden_dim] * (num_layers) + [feature_dim]
         self.net = DiagNormalNet(sizes)
 
     def forward(self, z: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -27,7 +27,7 @@ class ADecoder(nn.Module):
 
     def __init__(self, latent_dim: int, hidden_dim: int, num_layers: int):
         super().__init__()
-        sizes = [latent_dim] + [hidden_dim] * (num_layers - 1)
+        sizes = [latent_dim] + [hidden_dim] * (num_layers)
         self.net = BernoulliNet(sizes)
 
     def forward(self, z: torch.Tensor) -> torch.Tensor:

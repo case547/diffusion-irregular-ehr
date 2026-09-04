@@ -16,7 +16,13 @@ from src.model import HybridModel
 from train import calculate_val_loss, train_aux_outcome
 
 VAE_CFG = VAEConfig(
-    feature_dim=5, latent_dim=4, hidden_dim=16, num_layers=2, a_decoder_hidden_dim=5
+    feature_dim=5,
+    latent_dim=4,
+    hidden_dim=16,
+    encoder_num_layers=2,
+    decoder_num_layers=1,
+    aux_num_layers=1,
+    a_decoder_hidden_dim=5,
 )
 DIFF_CFG = DiffusionConfig(
     num_steps=10,
@@ -161,7 +167,7 @@ def test_train_aux_outcome_loss_decreases():
     torch.manual_seed(0)
     np.random.seed(0)
     train_loader, val_loader = _aux_loaders()
-    aux = AuxOutcome(VAE_CFG.feature_dim, VAE_CFG.hidden_dim, VAE_CFG.num_layers)
+    aux = AuxOutcome(VAE_CFG.feature_dim, VAE_CFG.hidden_dim, VAE_CFG.aux_num_layers)
     cfg = Config(
         vae=VAE_CFG,
         diffusion=DIFF_CFG,
@@ -192,7 +198,7 @@ def test_train_aux_outcome_early_stopping_fires():
     torch.manual_seed(1)
     np.random.seed(1)
     train_loader, val_loader = _aux_loaders()
-    aux = AuxOutcome(VAE_CFG.feature_dim, VAE_CFG.hidden_dim, VAE_CFG.num_layers)
+    aux = AuxOutcome(VAE_CFG.feature_dim, VAE_CFG.hidden_dim, VAE_CFG.aux_num_layers)
     cfg = Config(
         vae=VAE_CFG,
         diffusion=DIFF_CFG,
@@ -224,7 +230,7 @@ def test_train_aux_outcome_restores_best_state():
     torch.manual_seed(2)
     np.random.seed(2)
     train_loader, val_loader = _aux_loaders()
-    aux = AuxOutcome(VAE_CFG.feature_dim, VAE_CFG.hidden_dim, VAE_CFG.num_layers)
+    aux = AuxOutcome(VAE_CFG.feature_dim, VAE_CFG.hidden_dim, VAE_CFG.aux_num_layers)
     cfg = Config(
         vae=VAE_CFG,
         diffusion=DIFF_CFG,
