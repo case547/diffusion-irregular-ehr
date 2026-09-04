@@ -14,8 +14,13 @@ diffusion:
   hidden_dim: 32     # output head width (output_projection1/2, y0/y1 layers); contracts like DiffPO (cond_dim -> hidden_dim)
   num_blocks: 4      # number of residual blocks
   clip_denoised: True  # whether to clip denoised predictions during reverse diffusion
-  use_ipw: False  # z-space IPW via a_decoder
+  use_ipw: True  # z-space IPW via a_decoder
   cf_anchor_weight: 1  # soft-mask weight for counterfactual slot, anchored to pre-trained AuxOutcome's per-subject prediction. HybridModel only.
+  ipw_ramp_start: 100
+  ipw_ramp_end: 150
+  ipw_clip_prop: 0.1
+  ipw_z_samples: 5
+  ipw_ema_decay: 0.995
 
 train:
   epochs: 500
