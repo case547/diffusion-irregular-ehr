@@ -55,7 +55,7 @@ def calibration_diagnostic(
     the reliability curve.
     """
     order = torch.argsort(pi_hat)
-    bins = torch.chunk(order, n_bins)
+    bins = torch.tensor_split(order, n_bins)
     out: dict[str, float] = {}
     errs = []
 

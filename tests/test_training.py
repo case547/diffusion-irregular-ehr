@@ -464,3 +464,84 @@ def test_ttur_inactive_when_use_ipw_false():
         torch.optim.Adam.__init__ = original_init
 
     assert len(captured_groups[0]) == 1  # one flat param group, not two
+
+
+def test_train_loop_logs_ipw_diagnostics_once_past_ramp_start():
+    torch.manual_seed(11)
+    np.random.seed(11)
+    n, batch_size = 32, 16
+    loader = _loader(n=n, batch_size=batch_size)
+    cfg = Config(
+        model=MODEL_CFG,
+        diffusion=DiffusionConfig(
+            num_steps=10,
+            beta_start=0.0001,
+            beta_end=0.02,
+            schedule="quad",
+            embedding_dim=16,
+            block_dim=16,
+            hidden_dim=32,
+            num_blocks=2,
+            use_ipw=True,
+            ipw_ramp_start=1,
+            ipw_ramp_end=2,
+            ipw_ema_decay=0.9,
+        ),
+        train=TrainConfig(
+            epochs=2, batch_size=batch_size, lr=1e-3, seed=11, K=2, checkpoint_dir="/tmp"
+        ),
+        data=DataConfig(path="data/ihdp", replication=1, train_ratio=0.7, test_ratio=0.15),
+    )
+    model = HybridModel(cfg.model, cfg.diffusion)
+    device = torch.device("cpu")
+
+    logged = []
+    from train import _train_loop
+
+    _train_loop(
+        model,
+        loader,
+        loader,
+        cfg,
+        device,
+        "pytest_diag_run",
+        log_fn=lambda d, step: logged.append((step, d)),
+    )
+
+    # epoch 0 (epoch+1=1 >= ipw_ramp_start=1): diagnostics present.
+    step0_log = next(d for step, d in logged if step == 1)
+    assert "ipw/ess" in step0_log
+    assert "ipw/ess_frac" in step0_log
+    assert "ipw/calib_mae" in step0_log
+    assert all(f"ipw/calib_bin{i}_pred" in step0_log for i in range(10))
+
+
+def test_train_loop_skips_ipw_diagnostics_when_use_ipw_false():
+    torch.manual_seed(12)
+    np.random.seed(12)
+    loader = _loader(n=32, batch_size=16)
+    model = HybridModel(MODEL_CFG, DIFF_CFG)
+    cfg = Config(
+        model=MODEL_CFG,
+        diffusion=DIFF_CFG,
+        train=TrainConfig(
+            epochs=1, batch_size=16, lr=1e-3, seed=12, K=2, checkpoint_dir="/tmp"
+        ),
+        data=DataConfig(path="data/ihdp", replication=1, train_ratio=0.7, test_ratio=0.15),
+    )
+    device = torch.device("cpu")
+
+    logged = []
+    from train import _train_loop
+
+    _train_loop(
+        model,
+        loader,
+        loader,
+        cfg,
+        device,
+        "pytest_no_diag_run",
+        log_fn=lambda d, step: logged.append((step, d)),
+    )
+
+    assert not any(k.startswith("ipw/") for _, d in logged for k in d)
