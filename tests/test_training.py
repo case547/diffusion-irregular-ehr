@@ -362,3 +362,105 @@ def test_train_loop_skips_ema_when_ipw_disabled():
 
     assert captured.get("ema_a_decoder") is None
     assert captured.get("ema_encoder") is None
+
+
+def test_ttur_drops_a_decoder_lr_from_ramp_start():
+    torch.manual_seed(9)
+    np.random.seed(9)
+    n, batch_size = 32, 16
+    loader = _loader(n=n, batch_size=batch_size)
+    cfg = Config(
+        model=MODEL_CFG,
+        diffusion=DiffusionConfig(
+            num_steps=10,
+            beta_start=0.0001,
+            beta_end=0.02,
+            schedule="quad",
+            embedding_dim=16,
+            block_dim=16,
+            hidden_dim=32,
+            num_blocks=2,
+            use_ipw=True,
+            ipw_ramp_start=1,
+            ipw_ramp_end=2,
+            ipw_ema_decay=0.9,
+            ttur_factor=0.1,
+        ),
+        train=TrainConfig(
+            epochs=2, batch_size=batch_size, lr=1e-3, seed=9, K=2, checkpoint_dir="/tmp"
+        ),
+        data=DataConfig(path="data/ihdp", replication=1, train_ratio=0.7, test_ratio=0.15),
+    )
+    model = HybridModel(cfg.model, cfg.diffusion)
+    device = torch.device("cpu")
+
+    captured_lrs = []
+    captured_optimizers = []
+    original_step = torch.optim.lr_scheduler.MultiStepLR.step
+
+    def step_spy(self, *args, **kwargs):
+        result = original_step(self, *args, **kwargs)
+        captured_lrs.append([g["lr"] for g in self.optimizer.param_groups])
+        captured_optimizers.append(self.optimizer)
+        return result
+
+    torch.optim.lr_scheduler.MultiStepLR.step = step_spy
+    try:
+        from train import _train_loop
+
+        _train_loop(model, loader, loader, cfg, device, "pytest_ttur_run")
+    finally:
+        torch.optim.lr_scheduler.MultiStepLR.step = original_step
+
+    # torch.optim.lr_scheduler.LRScheduler.__init__ calls self.step() once itself
+    # (via _initial_step(), since PyTorch 1.1) in addition to the one call per epoch
+    # made explicitly by _train_loop -- verified empirically against the installed
+    # torch build, not assumed. With epochs=2 that's 1 (construction) + 2 (epochs) = 3.
+    assert len(captured_lrs) == 3
+    other_lr, a_decoder_lr = captured_lrs[-1]
+    assert a_decoder_lr == pytest.approx(other_lr * 0.1, rel=1e-6)
+
+    # Cross-check against the actual live optimizer state post-training (not just the
+    # spy's recorded snapshot), so this can't pass by coincidence of what the spy
+    # happened to capture.
+    final_optimizer = captured_optimizers[-1]
+    final_other_lr = final_optimizer.param_groups[0]["lr"]
+    final_a_decoder_lr = final_optimizer.param_groups[1]["lr"]
+    assert final_a_decoder_lr == pytest.approx(final_other_lr * 0.1, rel=1e-6)
+
+
+def test_ttur_inactive_when_use_ipw_false():
+    """A single Adam param group (no TTUR split) when use_ipw=False -- the default."""
+    torch.manual_seed(10)
+    loader = _loader(n=32, batch_size=16)
+    model = HybridModel(MODEL_CFG, DIFF_CFG)
+    cfg = Config(
+        model=MODEL_CFG,
+        diffusion=DIFF_CFG,
+        train=TrainConfig(
+            epochs=1, batch_size=16, lr=1e-3, seed=10, K=2, checkpoint_dir="/tmp"
+        ),
+        data=DataConfig(path="data/ihdp", replication=1, train_ratio=0.7, test_ratio=0.15),
+    )
+    device = torch.device("cpu")
+
+    captured_groups = []
+    original_init = torch.optim.Adam.__init__
+
+    def init_spy(self, params, **kwargs):
+        original_init(self, params, **kwargs)
+        # self.param_groups is always a list of dict-shaped groups after Optimizer
+        # construction, regardless of whether `params` was passed as a flat iterable
+        # of Parameters (1 implicit group) or a list of {"params": ..., "lr": ...}
+        # dicts (N explicit groups) -- inspect it here, not the raw `params` argument.
+        captured_groups.append(self.param_groups)
+
+    torch.optim.Adam.__init__ = init_spy
+    try:
+        from train import _train_loop
+
+        _train_loop(model, loader, loader, cfg, device, "pytest_no_ttur_run")
+    finally:
+        torch.optim.Adam.__init__ = original_init
+
+    assert len(captured_groups[0]) == 1  # one flat param group, not two
