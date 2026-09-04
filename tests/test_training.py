@@ -237,3 +237,35 @@ def test_train_aux_outcome_restores_best_state():
     # the restored (best) state's val loss on this same batch should be at or near the
     # best value logged during training, not the (worse) value from a later epoch
     assert final_val_loss == pytest.approx(best_val_loss_seen, abs=0.5)
+
+
+def test_train_loop_passes_current_epoch_to_compute_loss():
+    torch.manual_seed(3)
+    np.random.seed(3)
+    loader = _loader(n=32, batch_size=16)
+    model = HybridModel(MODEL_CFG, DIFF_CFG)
+    cfg = Config(
+        model=MODEL_CFG,
+        diffusion=DIFF_CFG,
+        train=TrainConfig(
+            epochs=3, batch_size=16, lr=1e-3, seed=3, K=2, checkpoint_dir="/tmp"
+        ),
+        data=DataConfig(path="data/ihdp", replication=1, train_ratio=0.7, test_ratio=0.15),
+    )
+    device = torch.device("cpu")
+
+    seen_epochs = []
+    original = model.compute_loss
+
+    def spy(*args, **kwargs):
+        seen_epochs.append(kwargs.get("epoch", args[5] if len(args) > 5 else 0))
+        return original(*args, **kwargs)
+
+    model.compute_loss = spy
+    from train import _train_loop
+
+    _train_loop(model, loader, loader, cfg, device, "pytest_epoch_run")
+    # 2 batches/epoch (32/16) * 3 epochs of training calls, plus calculate_val_loss's
+    # own calls each epoch -- every training-batch call for epoch e must report e.
+    training_epochs_seen = sorted(set(seen_epochs))
+    assert training_epochs_seen == [0, 1, 2]
