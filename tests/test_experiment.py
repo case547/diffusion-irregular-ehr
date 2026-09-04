@@ -1,11 +1,13 @@
 import numpy as np
 
 from experiment import run_condition
-from src.config import Config, DataConfig, DiffusionConfig, ModelConfig, TrainConfig
+from src.config import Config, DataConfig, DiffusionConfig, TrainConfig, VAEConfig
 from src.data import CausalDataset
 
 SMALL_CFG = Config(
-    model=ModelConfig(feature_dim=5, latent_dim=4, hidden_dim=16, num_layers=2),
+    vae=VAEConfig(
+        feature_dim=5, latent_dim=4, hidden_dim=16, num_layers=2, a_decoder_hidden_dim=5
+    ),
     diffusion=DiffusionConfig(
         num_steps=10,
         beta_start=0.0001,

@@ -1,8 +1,10 @@
-model:
+vae:
   feature_dim: 25  # IHDP has 25 covariates
   latent_dim: 20   # dim(z); CEVAE paper default
   hidden_dim: 64   # hidden layer width; proportionate to latent_dim=20 and ~550 training subjects
+  a_decoder_hidden_dim: 10  # hidden layer width of a_decoder
   num_layers: 2    # depth of encoder/decoder MLPs
+  a_decoder_label_smoothing: 0.0
 
 diffusion:
   num_steps: 200       # L diffusion steps
@@ -20,7 +22,6 @@ diffusion:
   ipw_ramp_end: 150
   ipw_clip_prop: 0.1
   ipw_z_samples: 5
-  ipw_ema_decay: 0.995
 
 train:
   epochs: 500
@@ -29,6 +30,7 @@ train:
   seed: 42
   K: 50       # PO samples at inference
   checkpoint_dir: checkpoints
+  ipw_ema_decay: 0.995
 
 data:
   path: data/ihdp
