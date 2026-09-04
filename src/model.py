@@ -201,9 +201,26 @@ class HybridModel(_DiffusionBase):
         self._ipw_ramp_end = diffusion_cfg.ipw_ramp_end
         self._ipw_clip_prop = diffusion_cfg.ipw_clip_prop
         self._ipw_z_samples = diffusion_cfg.ipw_z_samples
+        # Unlike the four ipw_* asserts below, this one isn't gated on use_ipw:
+        # a_decoder_label_smoothing is read/applied unconditionally in compute_loss
+        # (see the log_pa computation), so an out-of-range value is live even with
+        # use_ipw=False.
+        assert 0.0 <= diffusion_cfg.a_decoder_label_smoothing < 0.5, (
+            "a_decoder_label_smoothing must be in [0, 0.5) -- at >= 0.5, "
+            "a*(1-2*eps)+eps inverts the smoothed target"
+        )
         if self._use_ipw:
             assert diffusion_cfg.ipw_ramp_end > diffusion_cfg.ipw_ramp_start, (
                 "ipw_ramp_end must be > ipw_ramp_start when use_ipw=True"
+            )
+            assert 0.0 < diffusion_cfg.ipw_ema_decay < 1.0, (
+                "ipw_ema_decay must be in (0,1) when use_ipw=True -- 0.0 makes the EMA "
+                "shadow an exact copy of the live model every step (no decoupling at all), "
+                "silently defeating the mechanism's central defense against circularity"
+            )
+            assert diffusion_cfg.ipw_z_samples >= 1, (
+                "ipw_z_samples must be >= 1 when use_ipw=True -- 0 makes torch.stack([]) "
+                "raise RuntimeError inside _compute_phat"
             )
 
     def _apply_cf_anchor(

@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from src.config import DiffusionConfig, ModelConfig
@@ -272,6 +273,40 @@ def _ipw_cfg(**overrides):
     )
     kwargs.update(overrides)
     return DiffusionConfig(**kwargs)
+
+
+def test_init_validates_ipw_config_fields():
+    """use_ipw=True must reject each of the four invalid-field cases independently --
+    ipw_ramp_end<=ipw_ramp_start, ipw_ema_decay outside (0,1), ipw_z_samples<1, and
+    a_decoder_label_smoothing outside [0, 0.5)."""
+    with pytest.raises(AssertionError):
+        HybridModel(MODEL_CFG, _ipw_cfg(ipw_ramp_start=5, ipw_ramp_end=5))
+    with pytest.raises(AssertionError):
+        HybridModel(MODEL_CFG, _ipw_cfg(ipw_ema_decay=0.0))
+    with pytest.raises(AssertionError):
+        HybridModel(MODEL_CFG, _ipw_cfg(ipw_z_samples=0))
+    with pytest.raises(AssertionError):
+        HybridModel(MODEL_CFG, _ipw_cfg(a_decoder_label_smoothing=0.5))
+
+
+def test_a_decoder_label_smoothing_validated_even_when_use_ipw_false():
+    """a_decoder_label_smoothing is read/applied unconditionally in compute_loss (not
+    gated on use_ipw), so its validation must not be gated on use_ipw either -- this
+    is distinct from the four ipw_* asserts above, which only apply when use_ipw=True."""
+    invalid_cfg = DiffusionConfig(
+        num_steps=10,
+        beta_start=0.0001,
+        beta_end=0.02,
+        schedule="quad",
+        embedding_dim=16,
+        block_dim=16,
+        hidden_dim=32,
+        num_blocks=2,
+        use_ipw=False,
+        a_decoder_label_smoothing=0.6,
+    )
+    with pytest.raises(AssertionError):
+        HybridModel(MODEL_CFG, invalid_cfg)
 
 
 def test_compute_phat_shape_and_range():

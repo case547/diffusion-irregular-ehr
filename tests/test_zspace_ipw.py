@@ -110,3 +110,19 @@ def test_calibration_diagnostic_returns_all_bins():
         assert f"calib_bin{i}_pred" in out
         assert f"calib_bin{i}_empirical" in out
     assert "calib_mae" in out
+
+
+def test_calibration_diagnostic_returns_all_bins_when_not_evenly_divisible():
+    """n=32, n_bins=10: 10 does not evenly divide 32. torch.chunk would silently
+    return only 8 bins here (fixed chunk_size=ceil(32/10)=4, then 8 chunks of 4
+    fit) -- the exact bug that slipped past an earlier review because that task's
+    original tests only used evenly-divisible sizes. A direct regression test
+    belongs beside the primitive, not just transitively via a training-loop test."""
+    torch.manual_seed(1)
+    p_hat = torch.rand(32)
+    a = torch.randint(0, 2, (32,)).float()
+    out = calibration_diagnostic(p_hat, a, n_bins=10)
+    for i in range(10):
+        assert f"calib_bin{i}_pred" in out
+        assert f"calib_bin{i}_empirical" in out
+    assert "calib_mae" in out

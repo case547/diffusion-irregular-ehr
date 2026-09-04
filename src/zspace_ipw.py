@@ -9,14 +9,18 @@ import torch
 def zspace_ipw_weight(pi_hat: torch.Tensor, a: torch.Tensor, clip_prop: float) -> torch.Tensor:
     """Asymmetric arm-conditional trim, then normalise to mean 1.
 
-    w = a/pi_hat + (1-a)/(1-pi_hat) only explodes as pi_hat->0 for treated subjects, and as
-    pi_hat->1 for untreated subjects -- trimming is scoped to exactly those two cases, not a
-    blanket band on pi_hat regardless of arm.
+    w = a/pi_hat + (1-a)/(1-pi_hat) only explodes as pi_hat->0 for treated subjects, and
+    as pi_hat->1 for untreated subjects. Trimming is scoped to exactly those two cases,
+    not a blanket band on pi_hat regardless of arm.
 
-    Trimmed subjects fall back to raw weight 1 (not 0) so no training signal is lost, only the
-    correction for that subject is declined.
+    Trimmed subjects fall back to raw weight 1 (not 0) so no training signal is lost; only
+    the correction for that subject is declined.
 
-    Shapes: pi_hat, a, and the return are all (B,).
+    Shapes: `pi_hat`, `a`, and the return are all (B,).
+
+    Assumes `pi_hat` is strictly within (0, 1). This relies on the caller's logit clamp
+    (e.g. BernoulliNet's [-10, 10] clamp) to avoid NaN from a/pi_hat or (1-a)/(1-pi_hat)
+    at the boundary.
     """
     raw_w = a / pi_hat + (1 - a) / (1 - pi_hat)
     overlap_ok = ((a == 1) & (pi_hat >= clip_prop)) | ((a == 0) & ((1 - pi_hat) >= clip_prop))
