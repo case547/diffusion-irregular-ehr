@@ -20,6 +20,13 @@ class DiffusionConfig(BaseModel):
     clip_denoised: bool = False
     use_ipw: bool = False
     cf_anchor_weight: float = 0.0
+    ipw_ramp_start: int = 0
+    ipw_ramp_end: int = 0
+    ipw_clip_prop: float = 0.1
+    ipw_z_samples: int = 5
+    ipw_ema_decay: float = 0.0
+    a_decoder_label_smoothing: float = 0.0
+    ttur_factor: float = 1.0
 
 
 class TrainConfig(BaseModel):
