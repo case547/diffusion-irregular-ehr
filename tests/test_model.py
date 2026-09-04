@@ -2,10 +2,18 @@ import pytest
 import torch
 from pydantic import ValidationError
 
-from src.config import DiffusionConfig, ModelConfig
+from src.config import Config, DataConfig, DiffusionConfig, TrainConfig, VAEConfig
 from src.model import HybridModel
 
-MODEL_CFG = ModelConfig(feature_dim=5, latent_dim=4, hidden_dim=16, num_layers=2)
+VAE_CFG = VAEConfig(
+    feature_dim=5,
+    latent_dim=4,
+    hidden_dim=16,
+    encoder_num_layers=2,
+    decoder_num_layers=1,
+    aux_num_layers=1,
+    a_decoder_hidden_dim=5,
+)
 DIFF_CFG = DiffusionConfig(
     num_steps=10,
     beta_start=0.0001,
@@ -24,7 +32,7 @@ def _batch():
 
 
 def test_loss_component_keys_and_shapes():
-    model = HybridModel(MODEL_CFG, DIFF_CFG)
+    model = HybridModel(VAE_CFG, DIFF_CFG)
     comps = model.compute_loss(*_batch())
     assert set(comps.keys()) == {
         "log_px",
@@ -38,21 +46,21 @@ def test_loss_component_keys_and_shapes():
 
 
 def test_loss_components_finite():
-    model = HybridModel(MODEL_CFG, DIFF_CFG)
+    model = HybridModel(VAE_CFG, DIFF_CFG)
     comps = model.compute_loss(*_batch())
     for k, v in comps.items():
         assert torch.isfinite(v), f"{k} = {v}"
 
 
 def test_total_loss_finite():
-    model = HybridModel(MODEL_CFG, DIFF_CFG)
+    model = HybridModel(VAE_CFG, DIFF_CFG)
     loss = model.total_loss(model.compute_loss(*_batch()))
     assert loss.shape == ()
     assert torch.isfinite(loss)
 
 
 def test_backward():
-    model = HybridModel(MODEL_CFG, DIFF_CFG)
+    model = HybridModel(VAE_CFG, DIFF_CFG)
     loss = model.total_loss(model.compute_loss(*_batch()))
     loss.backward()
     assert model.encoder.trunk[0].weight.grad is not None
@@ -60,7 +68,7 @@ def test_backward():
 
 
 def test_sample_outcomes_shapes():
-    model = HybridModel(MODEL_CFG, DIFF_CFG)
+    model = HybridModel(VAE_CFG, DIFF_CFG)
     K = 3
     a = torch.randint(0, 2, (B,)).float()
     y0, y1 = model.sample_outcomes(torch.randn(B, F), a, K=K)
@@ -88,7 +96,7 @@ def _anchor_cfg(**overrides):
 
 
 def test_cf_anchor_inert_by_default():
-    model = HybridModel(MODEL_CFG, DIFF_CFG)  # cf_anchor_weight defaults to 0.0
+    model = HybridModel(VAE_CFG, DIFF_CFG)  # cf_anchor_weight defaults to 0.0
     x, a, y_fac, y_cf = _batch()
     torch.manual_seed(0)
     comps = model.compute_loss(x, a, y_fac, y_cf)
@@ -100,7 +108,7 @@ def test_cf_anchor_inert_by_default():
 
 def test_cf_anchor_soft_mask_weight():
     cfg = _anchor_cfg(cf_anchor_weight=0.15)
-    model = HybridModel(MODEL_CFG, cfg)
+    model = HybridModel(VAE_CFG, cfg)
     a = torch.tensor([0.0, 1.0, 0.0, 1.0])
     factual_mask = torch.stack([1 - a, a], dim=1)
     soft_mask = factual_mask + model._cf_anchor_weight * (1.0 - factual_mask)
@@ -110,7 +118,7 @@ def test_cf_anchor_soft_mask_weight():
 
 def test_cf_anchor_finite_loss():
     cfg = _anchor_cfg(cf_anchor_weight=0.1)
-    model = HybridModel(MODEL_CFG, cfg)
+    model = HybridModel(VAE_CFG, cfg)
     x, a, y_fac, y_cf = _batch()
     comps = model.compute_loss(x, a, y_fac, y_cf)
     assert torch.isfinite(comps["diffusion_loss"])
@@ -120,7 +128,7 @@ def test_cf_anchor_uses_aux_outcome_not_y_cf():
     """Spy on the real _noise_targets call inside compute_loss -- directly verifies what
     cf_target compute_loss actually constructed. A wrong or skipped substitution fails this."""
     cfg = _anchor_cfg(cf_anchor_weight=0.1)
-    model = HybridModel(MODEL_CFG, cfg)
+    model = HybridModel(VAE_CFG, cfg)
     x = torch.randn(B, 5)
     a = torch.tensor([0.0, 1.0, 0.0, 1.0])
     y_fac = torch.randn(B)
@@ -148,7 +156,7 @@ def test_cf_anchor_softens_gradient_mask_in_compute_loss():
     verifies the ACTUAL tensors reaching compute_loss's diffusion_loss computation, not
     just a standalone recomputation of the formula."""
     cfg = _anchor_cfg(cf_anchor_weight=0.15)
-    model = HybridModel(MODEL_CFG, cfg)
+    model = HybridModel(VAE_CFG, cfg)
     x, a, y_fac, y_cf = _batch()
     a = torch.tensor([0.0, 1.0, 0.0, 1.0])
 
@@ -189,7 +197,7 @@ def test_cf_anchor_detached_from_aux_outcome():
     aux_outcome via log_ry and would confound the check). If detachment were dropped,
     cf_target's dependency on aux_outcome.mean(x, 1-a) would make this fail."""
     cfg = _anchor_cfg(cf_anchor_weight=1.0)
-    model = HybridModel(MODEL_CFG, cfg)
+    model = HybridModel(VAE_CFG, cfg)
     comps = model.compute_loss(*_batch())
     comps["diffusion_loss"].backward()
     assert model.denoiser.cond_proj.weight.grad is not None
@@ -202,18 +210,17 @@ def test_cf_anchor_detached_from_aux_outcome():
 def test_a_decoder_label_smoothing_changes_log_pa_target():
     """With smoothing on, log_pa must differ from the unsmoothed value on the SAME z --
     spy on a_decoder.log_prob to capture the actual `a` tensor it was called with."""
-    cfg = DiffusionConfig(
-        num_steps=10,
-        beta_start=0.0001,
-        beta_end=0.02,
-        schedule="quad",
-        embedding_dim=16,
-        block_dim=16,
-        hidden_dim=32,
-        num_blocks=2,
+    cfg = VAEConfig(
+        feature_dim=5,
+        latent_dim=4,
+        hidden_dim=16,
+        encoder_num_layers=2,
+        decoder_num_layers=1,
+        aux_num_layers=1,
+        a_decoder_hidden_dim=5,
         a_decoder_label_smoothing=0.05,
     )
-    model = HybridModel(MODEL_CFG, cfg)
+    model = HybridModel(cfg, DIFF_CFG)
     x, a, y_fac, y_cf = _batch()
     a = torch.tensor([0.0, 1.0, 0.0, 1.0])
 
@@ -235,7 +242,7 @@ def test_a_decoder_label_smoothing_changes_log_pa_target():
 def test_a_decoder_label_smoothing_is_noop_when_zero():
     """Default a_decoder_label_smoothing=0.0 must reach a_decoder.log_prob with the raw,
     unsmoothed `a` -- exact equality with today's behavior."""
-    model = HybridModel(MODEL_CFG, DIFF_CFG)  # a_decoder_label_smoothing defaults to 0.0
+    model = HybridModel(VAE_CFG, DIFF_CFG)  # a_decoder_label_smoothing defaults to 0.0
     x, a, y_fac, y_cf = _batch()
     a = torch.tensor([0.0, 1.0, 0.0, 1.0])
 
@@ -255,7 +262,7 @@ def test_a_decoder_label_smoothing_is_noop_when_zero():
 # ── z-space IPW weight application ─────────────────────────────────────────
 
 
-def _ipw_cfg(**overrides):
+def _ipw_diff_cfg(**overrides):
     kwargs = dict(
         num_steps=10,
         beta_start=0.0001,
@@ -270,7 +277,6 @@ def _ipw_cfg(**overrides):
         ipw_ramp_end=1,
         ipw_clip_prop=0.1,
         ipw_z_samples=2,
-        ipw_ema_decay=0.9,
     )
     kwargs.update(overrides)
     return DiffusionConfig(**kwargs)
@@ -279,42 +285,36 @@ def _ipw_cfg(**overrides):
 def test_config_validates_ipw_fields():
     """DiffusionConfig itself (not HybridModel) must reject each of the four
     invalid-field cases independently -- ipw_ramp_end<=ipw_ramp_start, ipw_ema_decay
-    outside (0,1), ipw_z_samples<1, and a_decoder_label_smoothing outside [0, 0.5) --
+    outside [0,1), ipw_z_samples<1, and a_decoder_label_smoothing outside [0, 0.5) --
     at config-construction time, before any model is ever built."""
     with pytest.raises(ValidationError):
-        _ipw_cfg(ipw_ramp_start=5, ipw_ramp_end=5)
+        _ipw_diff_cfg(ipw_ramp_start=5, ipw_ramp_end=5)
     with pytest.raises(ValidationError):
-        _ipw_cfg(ipw_ema_decay=0.0)
-    with pytest.raises(ValidationError):
-        _ipw_cfg(ipw_z_samples=0)
-    with pytest.raises(ValidationError):
-        _ipw_cfg(a_decoder_label_smoothing=0.5)
-
-
-def test_a_decoder_label_smoothing_validated_even_when_use_ipw_false():
-    """a_decoder_label_smoothing is read/applied unconditionally in compute_loss (not
-    gated on use_ipw), so its validation must not be gated on use_ipw either -- this
-    is distinct from the three ipw_* checks above, which only apply when use_ipw=True."""
-    with pytest.raises(ValidationError):
-        DiffusionConfig(
-            num_steps=10,
-            beta_start=0.0001,
-            beta_end=0.02,
-            schedule="quad",
-            embedding_dim=16,
-            block_dim=16,
-            hidden_dim=32,
-            num_blocks=2,
-            use_ipw=False,
-            a_decoder_label_smoothing=0.6,
+        diff_cfg = _ipw_diff_cfg()
+        train_cfg = TrainConfig(
+            epochs=1,
+            batch_size=1,
+            lr=1e-3,
+            seed=0,
+            K=1,
+            checkpoint_dir="/tmp",
+            ipw_ema_decay=1.0,
         )
+        data_cfg = DataConfig(path="/tmp", replication=1, train_ratio=0.8, test_ratio=0.2)
+        _ = Config(vae=VAE_CFG, diffusion=diff_cfg, train=train_cfg, data=data_cfg)
+    with pytest.raises(ValidationError):
+        _ipw_diff_cfg(ipw_z_samples=0)
+    with pytest.raises(ValidationError):
+        illegal_config = VAE_CFG.model_dump()
+        illegal_config["a_decoder_label_smoothing"] = 0.5
+        _ = VAEConfig(**illegal_config)
 
 
 def test_compute_phat_shape_and_range():
     from ema_pytorch import EMA
 
-    cfg = _ipw_cfg()
-    model = HybridModel(MODEL_CFG, cfg)
+    cfg = _ipw_diff_cfg()
+    model = HybridModel(VAE_CFG, cfg)
     ema_a_decoder = EMA(model.a_decoder, beta=0.9, update_after_step=0, update_every=1)
     ema_encoder = EMA(model.encoder, beta=0.9, update_after_step=0, update_every=1)
     ema_a_decoder.update()
@@ -333,8 +333,8 @@ def test_compute_loss_uses_ipw_weight_when_active():
     from ema_pytorch import EMA
 
     torch.manual_seed(6)
-    cfg = _ipw_cfg(ipw_ramp_start=0, ipw_ramp_end=1)
-    model = HybridModel(MODEL_CFG, cfg)
+    cfg = _ipw_diff_cfg(ipw_ramp_start=0, ipw_ramp_end=1)
+    model = HybridModel(VAE_CFG, cfg)
     ema_a_decoder = EMA(model.a_decoder, beta=0.9, update_after_step=0, update_every=1)
     ema_encoder = EMA(model.encoder, beta=0.9, update_after_step=0, update_every=1)
     ema_a_decoder.update()
@@ -385,8 +385,8 @@ def test_compute_loss_falls_back_to_unweighted_before_ramp_start():
     from ema_pytorch import EMA
 
     torch.manual_seed(7)
-    cfg = _ipw_cfg(ipw_ramp_start=5, ipw_ramp_end=10)
-    model = HybridModel(MODEL_CFG, cfg)
+    cfg = _ipw_diff_cfg(ipw_ramp_start=5, ipw_ramp_end=10)
+    model = HybridModel(VAE_CFG, cfg)
     ema_a_decoder = EMA(model.a_decoder, beta=0.9, update_after_step=0, update_every=1)
     ema_encoder = EMA(model.encoder, beta=0.9, update_after_step=0, update_every=1)
     ema_a_decoder.update()
@@ -440,7 +440,7 @@ def test_compute_loss_falls_back_to_unweighted_when_use_ipw_false():
     from ema_pytorch import EMA
 
     x, a, y_fac, y_cf = _batch()
-    model = HybridModel(MODEL_CFG, DIFF_CFG)  # use_ipw defaults to False
+    model = HybridModel(VAE_CFG, DIFF_CFG)  # use_ipw defaults to False
     ema_a_decoder = EMA(model.a_decoder, beta=0.9, update_after_step=0, update_every=1)
     ema_encoder = EMA(model.encoder, beta=0.9, update_after_step=0, update_every=1)
     ema_a_decoder.update()

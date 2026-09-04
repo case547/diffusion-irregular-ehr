@@ -6,7 +6,7 @@ import torch.nn as nn
 from ema_pytorch import EMA
 
 from src.auxiliary import AuxOutcome
-from src.config import DiffusionConfig, ModelConfig
+from src.config import DiffusionConfig, VAEConfig
 from src.decoders import ADecoder, XDecoder
 from src.denoiser import Denoiser
 from src.encoder import ZEncoder
@@ -172,19 +172,27 @@ class HybridModel(_DiffusionBase):
     x-space PropensityNet would estimate the wrong propensity here (unlike DiffPO's).
     """
 
-    def __init__(self, model_cfg: ModelConfig, diffusion_cfg: DiffusionConfig):
+    def __init__(self, vae_cfg: VAEConfig, diffusion_cfg: DiffusionConfig):
         super().__init__()
-        m = model_cfg
 
         # Encoder-decoder stack for z-space latent confounder model
-        self.encoder = ZEncoder(m.feature_dim, m.latent_dim, m.hidden_dim, m.num_layers)
-        self.x_decoder = XDecoder(m.latent_dim, m.feature_dim, m.hidden_dim, m.num_layers)
-        self.a_decoder = ADecoder(m.latent_dim, m.hidden_dim, m.num_layers)
-        self.aux_outcome = AuxOutcome(m.feature_dim, m.hidden_dim, m.num_layers)
+        vc = vae_cfg
+        self.encoder = ZEncoder(
+            vc.feature_dim, vc.latent_dim, vc.hidden_dim, vc.encoder_num_layers
+        )
+        self.x_decoder = XDecoder(
+            vc.latent_dim, vc.feature_dim, vc.hidden_dim, vc.decoder_num_layers
+        )
+        self.a_decoder = ADecoder(
+            vc.latent_dim, vc.a_decoder_hidden_dim, vc.decoder_num_layers
+        )
+        self.aux_outcome = AuxOutcome(vc.feature_dim, vc.hidden_dim, vc.aux_num_layers)
+
+        self._a_decoder_label_smoothing = vae_cfg.a_decoder_label_smoothing
 
         # Diffusion denoiser for y-space potential outcome model, conditioned on z and a
         self.denoiser = Denoiser(
-            latent_dim=m.latent_dim,
+            input_dim=vc.latent_dim,
             block_dim=diffusion_cfg.block_dim,
             hidden_dim=diffusion_cfg.hidden_dim,
             embedding_dim=diffusion_cfg.embedding_dim,
@@ -196,7 +204,6 @@ class HybridModel(_DiffusionBase):
 
         # IPW configuration
         # Field-range validation for the below lives on DiffusionConfig itself (see config.py)
-        self._a_decoder_label_smoothing = diffusion_cfg.a_decoder_label_smoothing
         self._use_ipw = diffusion_cfg.use_ipw
         self._ipw_ramp_start = diffusion_cfg.ipw_ramp_start
         self._ipw_ramp_end = diffusion_cfg.ipw_ramp_end
@@ -350,11 +357,11 @@ class DiffPO(_DiffusionBase):
     Optional IPW weighting via a pre-trained frozen PropensityNet.
     """
 
-    def __init__(self, model_cfg: ModelConfig, diffusion_cfg: DiffusionConfig):
+    def __init__(self, vae_cfg: VAEConfig, diffusion_cfg: DiffusionConfig):
         super().__init__()
-        m = model_cfg
+        vc = vae_cfg
         self.denoiser = Denoiser(
-            latent_dim=m.feature_dim,  # cond_proj takes [a, x]: size feature_dim+1
+            input_dim=vc.feature_dim,  # cond_proj takes [a, x]: size feature_dim+1
             block_dim=diffusion_cfg.block_dim,
             hidden_dim=diffusion_cfg.hidden_dim,
             embedding_dim=diffusion_cfg.embedding_dim,

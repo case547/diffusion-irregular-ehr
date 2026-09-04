@@ -9,7 +9,7 @@ class AuxTreatment(nn.Module):
 
     def __init__(self, feature_dim: int, hidden_dim: int, num_layers: int):
         super().__init__()
-        sizes = [feature_dim] + [hidden_dim] * (num_layers - 1)
+        sizes = [feature_dim] + [hidden_dim] * (num_layers)
         self.net = BernoulliNet(sizes)
 
     def _logits(self, x: torch.Tensor) -> torch.Tensor:
@@ -33,7 +33,7 @@ class AuxOutcome(nn.Module):
 
     def __init__(self, feature_dim: int, hidden_dim: int, num_layers: int):
         super().__init__()
-        trunk_sizes = [feature_dim] + [hidden_dim] * (num_layers - 1)
+        trunk_sizes = [feature_dim] + [hidden_dim] * (num_layers)
         self.trunk = FullyConnected(trunk_sizes, final_activation=nn.ELU())
         self.head0 = NormalNet([hidden_dim])  # a=0
         self.head1 = NormalNet([hidden_dim])  # a=1

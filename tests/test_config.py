@@ -18,10 +18,7 @@ def test_ipw_fields_have_inert_defaults():
     assert cfg.ipw_ramp_start == 0
     assert cfg.ipw_ramp_end == 0
     assert cfg.ipw_clip_prop == 0.1
-    assert cfg.ipw_z_samples == 5
-    assert cfg.ipw_ema_decay == 0.0
-    assert cfg.a_decoder_label_smoothing == 0.0
-    assert cfg.ttur_factor == 1.0
+    assert cfg.ipw_z_samples == 1
 
 
 def test_ipw_fields_accept_overrides():
@@ -32,14 +29,8 @@ def test_ipw_fields_accept_overrides():
         ipw_ramp_end=300,
         ipw_clip_prop=0.05,
         ipw_z_samples=3,
-        ipw_ema_decay=0.9,
-        a_decoder_label_smoothing=0.05,
-        ttur_factor=0.1,
     )
     assert cfg.ipw_ramp_start == 100
     assert cfg.ipw_ramp_end == 300
     assert cfg.ipw_clip_prop == 0.05
     assert cfg.ipw_z_samples == 3
-    assert cfg.ipw_ema_decay == 0.9
-    assert cfg.a_decoder_label_smoothing == 0.05
-    assert cfg.ttur_factor == 0.1

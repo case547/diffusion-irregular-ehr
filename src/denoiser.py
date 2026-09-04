@@ -77,15 +77,17 @@ class ResidualBlock(nn.Module):
 
 
 class Denoiser(nn.Module):
-    """ε_θ(noisy_y, τ | z, a) -- DiffPO-style denoiser conditioned on latent z and treatment a.
+    """DiffPO-style denoiser conditioned on latent `z` or covariates `x`, and treatment `a`.
 
-    diff_input = cond_proj([a, z]) + mapping_noise(noisy_y); ResidualBlocks refine;
-    dual output heads produce joint [ε_y0, ε_y1] prediction.
+    `ε_θ(noisy_y, τ | z_or_x, a)`
+
+    diff_input = `cond_proj([a, z]) + mapping_noise(noisy_y)`; `ResidualBlock`s refine; dual
+    output heads produce joint `[ε_y(0), ε_y(1)]` prediction.
     """
 
     def __init__(
         self,
-        latent_dim: int,
+        input_dim: int,
         block_dim: int,
         hidden_dim: int,
         embedding_dim: int,
@@ -95,7 +97,7 @@ class Denoiser(nn.Module):
         super().__init__()
         self.num_blocks = num_blocks
 
-        self.cond_proj = nn.Linear(latent_dim + 1, block_dim)  # projects [a, z]
+        self.cond_proj = nn.Linear(input_dim + 1, block_dim)  # projects [a, z_or_x]
         self.mapping_noise = nn.Linear(2, block_dim)
 
         self.diffusion_embedding = DiffusionEmbedding(num_steps, embedding_dim)
@@ -116,11 +118,11 @@ class Denoiser(nn.Module):
         self,
         noisy_y: torch.Tensor,
         tau: torch.Tensor,
-        z: torch.Tensor,
+        z_or_x: torch.Tensor,
         a: torch.Tensor,
     ) -> torch.Tensor:
-        """noisy_y: (B,2), tau: (B,) long, z: (B, latent_dim), a: (B,) -> (B,2)"""
-        cond = torch.cat([a.unsqueeze(-1), z], dim=-1)  # [B, latent_dim+1]
+        """noisy_y: (B,2), tau: (B,) long, z_or_x: (B, input_dim), a: (B,) -> (B,2)"""
+        cond = torch.cat([a.unsqueeze(-1), z_or_x], dim=-1)  # [B, input_dim+1]
         h = F.relu(self.cond_proj(cond) + self.mapping_noise(noisy_y))  # [B, block_dim]
 
         diff_emb = self.diffusion_embedding(tau)

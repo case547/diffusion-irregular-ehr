@@ -1,10 +1,18 @@
 import torch
 
-from src.config import DiffusionConfig, ModelConfig
+from src.config import DiffusionConfig, VAEConfig
 from src.model import DiffPO
 from src.propensity import PropensityNet
 
-MODEL_CFG = ModelConfig(feature_dim=5, latent_dim=4, hidden_dim=16, num_layers=2)
+VAE_CFG = VAEConfig(
+    feature_dim=5,
+    latent_dim=4,
+    hidden_dim=16,
+    encoder_num_layers=2,
+    decoder_num_layers=1,
+    aux_num_layers=1,
+    a_decoder_hidden_dim=5,
+)
 DIFF_CFG = DiffusionConfig(
     num_steps=10,
     beta_start=0.0001,
@@ -23,7 +31,7 @@ def _batch():
 
 
 def test_loss_keys_and_finite():
-    model = DiffPO(MODEL_CFG, DIFF_CFG)
+    model = DiffPO(VAE_CFG, DIFF_CFG)
     comps = model.compute_loss(*_batch())
     assert set(comps.keys()) == {"diffusion_loss"}
     assert comps["diffusion_loss"].shape == ()
@@ -31,7 +39,7 @@ def test_loss_keys_and_finite():
 
 
 def test_loss_with_propnet():
-    model = DiffPO(MODEL_CFG, DIFF_CFG)
+    model = DiffPO(VAE_CFG, DIFF_CFG)
     propnet = PropensityNet(
         n_unit_in=F,
         n_units_out_prop=16,
@@ -44,13 +52,13 @@ def test_loss_with_propnet():
 
 
 def test_backward():
-    model = DiffPO(MODEL_CFG, DIFF_CFG)
+    model = DiffPO(VAE_CFG, DIFF_CFG)
     model.total_loss(model.compute_loss(*_batch())).backward()
     assert model.denoiser.cond_proj.weight.grad is not None
 
 
 def test_sample_outcomes_shapes():
-    model = DiffPO(MODEL_CFG, DIFF_CFG)
+    model = DiffPO(VAE_CFG, DIFF_CFG)
     x = torch.randn(B, F)
     a = torch.randint(0, 2, (B,)).float()
     y0, y1 = model.sample_outcomes(x, a, K=3)
@@ -72,7 +80,7 @@ def test_sample_outcomes_clip_val_bounds_output():
         num_blocks=2,
     )
     torch.manual_seed(0)
-    model = DiffPO(MODEL_CFG, steep_diff_cfg)
+    model = DiffPO(VAE_CFG, steep_diff_cfg)
     x = torch.randn(B, F)
     a = torch.randint(0, 2, (B,)).float()
 

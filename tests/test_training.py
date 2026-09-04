@@ -10,12 +10,20 @@ from torch.utils.data import DataLoader
 
 import src.model as model_module
 from src.auxiliary import AuxOutcome
-from src.config import Config, DataConfig, DiffusionConfig, ModelConfig, TrainConfig
+from src.config import Config, DataConfig, DiffusionConfig, TrainConfig, VAEConfig
 from src.data import CausalDataset
 from src.model import HybridModel
 from train import calculate_val_loss, train_aux_outcome
 
-MODEL_CFG = ModelConfig(feature_dim=5, latent_dim=4, hidden_dim=16, num_layers=2)
+VAE_CFG = VAEConfig(
+    feature_dim=5,
+    latent_dim=4,
+    hidden_dim=16,
+    encoder_num_layers=2,
+    decoder_num_layers=1,
+    aux_num_layers=1,
+    a_decoder_hidden_dim=5,
+)
 DIFF_CFG = DiffusionConfig(
     num_steps=10,
     beta_start=0.0001,
@@ -59,7 +67,7 @@ def test_one_training_step():
     torch.manual_seed(0)
     np.random.seed(0)
     loader = _loader()
-    model = HybridModel(MODEL_CFG, DIFF_CFG)
+    model = HybridModel(VAE_CFG, DIFF_CFG)
     opt = Adam(model.parameters(), lr=1e-3)
     model.train()
     batch = next(iter(loader))
@@ -76,7 +84,7 @@ def test_loss_decreases_over_20_steps():
     torch.manual_seed(1)
     np.random.seed(1)
     loader = _loader(n=64, batch_size=64)
-    model = HybridModel(MODEL_CFG, DIFF_CFG)
+    model = HybridModel(VAE_CFG, DIFF_CFG)
     opt = Adam(model.parameters(), lr=1e-2)
     model.train()
     losses = []
@@ -96,7 +104,7 @@ def test_loss_decreases_over_20_steps():
 
 def test_val_loss_finite():
     torch.manual_seed(2)
-    model = HybridModel(MODEL_CFG, DIFF_CFG)
+    model = HybridModel(VAE_CFG, DIFF_CFG)
     loader = _loader()
     device = torch.device("cpu")
     comps = calculate_val_loss(model, loader, device)
@@ -115,7 +123,7 @@ def test_checkpoint_saved(tmp_path):
     torch.manual_seed(2)
     np.random.seed(2)
     cfg = Config(
-        model=MODEL_CFG,
+        vae=VAE_CFG,
         diffusion=DIFF_CFG,
         train=TrainConfig(
             epochs=4, batch_size=16, lr=1e-3, seed=2, K=2, checkpoint_dir=str(tmp_path)
@@ -125,14 +133,14 @@ def test_checkpoint_saved(tmp_path):
     from train import _train_loop
 
     loader = _loader(n=32, f=5, batch_size=16)
-    model = HybridModel(cfg.model, cfg.diffusion)
+    model = HybridModel(cfg.vae, cfg.diffusion)
     device = torch.device("cpu")
     Path(cfg.train.checkpoint_dir).mkdir(parents=True, exist_ok=True)
     run_id = "pytest_run"
     _train_loop(model, loader, loader, cfg, device, run_id)
     ckpt_path = Path(cfg.train.checkpoint_dir) / f"final_model_{run_id}.pth"
     assert ckpt_path.exists()
-    model2 = HybridModel(cfg.model, cfg.diffusion)
+    model2 = HybridModel(cfg.vae, cfg.diffusion)
     model2.load_state_dict(torch.load(ckpt_path, map_location="cpu"))  # must not raise
 
 
@@ -159,9 +167,9 @@ def test_train_aux_outcome_loss_decreases():
     torch.manual_seed(0)
     np.random.seed(0)
     train_loader, val_loader = _aux_loaders()
-    aux = AuxOutcome(MODEL_CFG.feature_dim, MODEL_CFG.hidden_dim, MODEL_CFG.num_layers)
+    aux = AuxOutcome(VAE_CFG.feature_dim, VAE_CFG.hidden_dim, VAE_CFG.aux_num_layers)
     cfg = Config(
-        model=MODEL_CFG,
+        vae=VAE_CFG,
         diffusion=DIFF_CFG,
         train=TrainConfig(
             epochs=20, batch_size=16, lr=1e-2, seed=0, K=2, checkpoint_dir="/tmp"
@@ -190,9 +198,9 @@ def test_train_aux_outcome_early_stopping_fires():
     torch.manual_seed(1)
     np.random.seed(1)
     train_loader, val_loader = _aux_loaders()
-    aux = AuxOutcome(MODEL_CFG.feature_dim, MODEL_CFG.hidden_dim, MODEL_CFG.num_layers)
+    aux = AuxOutcome(VAE_CFG.feature_dim, VAE_CFG.hidden_dim, VAE_CFG.aux_num_layers)
     cfg = Config(
-        model=MODEL_CFG,
+        vae=VAE_CFG,
         diffusion=DIFF_CFG,
         train=TrainConfig(
             epochs=50, batch_size=16, lr=1e-2, seed=1, K=2, checkpoint_dir="/tmp"
@@ -222,9 +230,9 @@ def test_train_aux_outcome_restores_best_state():
     torch.manual_seed(2)
     np.random.seed(2)
     train_loader, val_loader = _aux_loaders()
-    aux = AuxOutcome(MODEL_CFG.feature_dim, MODEL_CFG.hidden_dim, MODEL_CFG.num_layers)
+    aux = AuxOutcome(VAE_CFG.feature_dim, VAE_CFG.hidden_dim, VAE_CFG.aux_num_layers)
     cfg = Config(
-        model=MODEL_CFG,
+        vae=VAE_CFG,
         diffusion=DIFF_CFG,
         train=TrainConfig(
             epochs=50, batch_size=16, lr=1e-1, seed=2, K=2, checkpoint_dir="/tmp"
@@ -261,9 +269,9 @@ def test_train_loop_passes_current_epoch_to_compute_loss():
     torch.manual_seed(3)
     np.random.seed(3)
     loader = _loader(n=32, batch_size=16)
-    model = HybridModel(MODEL_CFG, DIFF_CFG)
+    model = HybridModel(VAE_CFG, DIFF_CFG)
     cfg = Config(
-        model=MODEL_CFG,
+        vae=VAE_CFG,
         diffusion=DIFF_CFG,
         train=TrainConfig(
             epochs=3, batch_size=16, lr=1e-3, seed=3, K=2, checkpoint_dir="/tmp"
@@ -300,7 +308,7 @@ def test_train_loop_builds_and_updates_ema_when_ipw_enabled():
     epochs = 2
     loader = _loader(n=n, batch_size=batch_size)
     cfg = Config(
-        model=MODEL_CFG,
+        vae=VAE_CFG,
         diffusion=DiffusionConfig(
             num_steps=10,
             beta_start=0.0001,
@@ -313,14 +321,19 @@ def test_train_loop_builds_and_updates_ema_when_ipw_enabled():
             use_ipw=True,
             ipw_ramp_start=1,
             ipw_ramp_end=2,
-            ipw_ema_decay=0.9,
         ),
         train=TrainConfig(
-            epochs=epochs, batch_size=batch_size, lr=1e-3, seed=4, K=2, checkpoint_dir="/tmp"
+            epochs=epochs,
+            batch_size=batch_size,
+            lr=1e-3,
+            seed=4,
+            K=2,
+            checkpoint_dir="/tmp",
+            ipw_ema_decay=0.9,
         ),
         data=DataConfig(path="data/ihdp", replication=1, train_ratio=0.7, test_ratio=0.15),
     )
-    model = HybridModel(cfg.model, cfg.diffusion)
+    model = HybridModel(cfg.vae, cfg.diffusion)
     device = torch.device("cpu")
 
     captured: dict = {}
@@ -343,9 +356,9 @@ def test_train_loop_skips_ema_when_ipw_disabled():
     torch.manual_seed(5)
     np.random.seed(5)
     loader = _loader(n=32, batch_size=16)
-    model = HybridModel(MODEL_CFG, DIFF_CFG)  # use_ipw defaults to False
+    model = HybridModel(VAE_CFG, DIFF_CFG)  # use_ipw defaults to False
     cfg = Config(
-        model=MODEL_CFG,
+        vae=VAE_CFG,
         diffusion=DIFF_CFG,
         train=TrainConfig(
             epochs=1, batch_size=16, lr=1e-3, seed=5, K=2, checkpoint_dir="/tmp"
@@ -371,7 +384,7 @@ def test_ttur_drops_a_decoder_lr_from_ramp_start():
     n, batch_size = 32, 16
     loader = _loader(n=n, batch_size=batch_size)
     cfg = Config(
-        model=MODEL_CFG,
+        vae=VAE_CFG,
         diffusion=DiffusionConfig(
             num_steps=10,
             beta_start=0.0001,
@@ -384,15 +397,20 @@ def test_ttur_drops_a_decoder_lr_from_ramp_start():
             use_ipw=True,
             ipw_ramp_start=1,
             ipw_ramp_end=2,
-            ipw_ema_decay=0.9,
-            ttur_factor=0.1,
         ),
         train=TrainConfig(
-            epochs=2, batch_size=batch_size, lr=1e-3, seed=9, K=2, checkpoint_dir="/tmp"
+            epochs=2,
+            batch_size=batch_size,
+            lr=1e-3,
+            seed=9,
+            K=2,
+            checkpoint_dir="/tmp",
+            ipw_ema_decay=0.9,
+            prop_ttur_factor=0.1,
         ),
         data=DataConfig(path="data/ihdp", replication=1, train_ratio=0.7, test_ratio=0.15),
     )
-    model = HybridModel(cfg.model, cfg.diffusion)
+    model = HybridModel(cfg.vae, cfg.diffusion)
     device = torch.device("cpu")
 
     captured_lrs = []
@@ -434,9 +452,9 @@ def test_ttur_inactive_when_use_ipw_false():
     """A single Adam param group (no TTUR split) when use_ipw=False -- the default."""
     torch.manual_seed(10)
     loader = _loader(n=32, batch_size=16)
-    model = HybridModel(MODEL_CFG, DIFF_CFG)
+    model = HybridModel(VAE_CFG, DIFF_CFG)
     cfg = Config(
-        model=MODEL_CFG,
+        vae=VAE_CFG,
         diffusion=DIFF_CFG,
         train=TrainConfig(
             epochs=1, batch_size=16, lr=1e-3, seed=10, K=2, checkpoint_dir="/tmp"
@@ -473,7 +491,7 @@ def test_train_loop_logs_ipw_diagnostics_once_past_ramp_start():
     n, batch_size = 32, 16
     loader = _loader(n=n, batch_size=batch_size)
     cfg = Config(
-        model=MODEL_CFG,
+        vae=VAE_CFG,
         diffusion=DiffusionConfig(
             num_steps=10,
             beta_start=0.0001,
@@ -486,14 +504,19 @@ def test_train_loop_logs_ipw_diagnostics_once_past_ramp_start():
             use_ipw=True,
             ipw_ramp_start=1,
             ipw_ramp_end=2,
-            ipw_ema_decay=0.9,
         ),
         train=TrainConfig(
-            epochs=2, batch_size=batch_size, lr=1e-3, seed=11, K=2, checkpoint_dir="/tmp"
+            epochs=2,
+            batch_size=batch_size,
+            lr=1e-3,
+            seed=11,
+            K=2,
+            checkpoint_dir="/tmp",
+            ipw_ema_decay=0.9,
         ),
         data=DataConfig(path="data/ihdp", replication=1, train_ratio=0.7, test_ratio=0.15),
     )
-    model = HybridModel(cfg.model, cfg.diffusion)
+    model = HybridModel(cfg.vae, cfg.diffusion)
     device = torch.device("cpu")
 
     logged = []
@@ -521,9 +544,9 @@ def test_train_loop_skips_ipw_diagnostics_when_use_ipw_false():
     torch.manual_seed(12)
     np.random.seed(12)
     loader = _loader(n=32, batch_size=16)
-    model = HybridModel(MODEL_CFG, DIFF_CFG)
+    model = HybridModel(VAE_CFG, DIFF_CFG)
     cfg = Config(
-        model=MODEL_CFG,
+        vae=VAE_CFG,
         diffusion=DIFF_CFG,
         train=TrainConfig(
             epochs=1, batch_size=16, lr=1e-3, seed=12, K=2, checkpoint_dir="/tmp"
@@ -586,12 +609,11 @@ def test_use_ipw_true_changes_trained_weights_vs_false(tmp_path):
             use_ipw=use_ipw,
             ipw_ramp_start=0,
             ipw_ramp_end=1,
-            ipw_ema_decay=0.9,
             ipw_z_samples=2,
         )
-        model = HybridModel(MODEL_CFG, diff_cfg)
+        model = HybridModel(VAE_CFG, diff_cfg)
         cfg = Config(
-            model=MODEL_CFG,
+            vae=VAE_CFG,
             diffusion=diff_cfg,
             train=TrainConfig(
                 epochs=epochs,
@@ -600,6 +622,7 @@ def test_use_ipw_true_changes_trained_weights_vs_false(tmp_path):
                 seed=42,
                 K=2,
                 checkpoint_dir=str(tmp_path),
+                ipw_ema_decay=0.9,
             ),
             data=DataConfig(path="data/ihdp", replication=1, train_ratio=0.7, test_ratio=0.15),
         )

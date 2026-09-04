@@ -224,8 +224,8 @@ def _train_loop(
     if ipw_model is not None:
         steps_per_epoch = len(train_loader)
         ema_kwargs = dict(
-            beta=cfg.diffusion.ipw_ema_decay,
-            min_value=cfg.diffusion.ipw_ema_decay,
+            beta=cfg.train.ipw_ema_decay,
+            min_value=cfg.train.ipw_ema_decay,
             update_after_step=cfg.diffusion.ipw_ramp_start * steps_per_epoch,
             update_every=1,
         )
@@ -234,8 +234,8 @@ def _train_loop(
 
     # If using z-space IPW with TTUR, split the optimiser into two groups: one for the
     # a_decoder (group 1) and one for all other parameters (group 0). The a_decoder's
-    # LR is multiplied by ttur_factor after ipw_ramp_start.
-    use_two_lrs = ipw_model is not None and cfg.diffusion.ttur_factor != 1.0
+    # LR is multiplied by prop_ttur_factor after ipw_ramp_start.
+    use_two_lrs = ipw_model is not None and cfg.train.prop_ttur_factor != 1.0
     if use_two_lrs:
         a_decoder_param_ids = {id(p) for p in ipw_model.a_decoder.parameters()}
         other_params = [p for p in model.parameters() if id(p) not in a_decoder_param_ids]
@@ -288,7 +288,7 @@ def _train_loop(
             # Re-derive from group 0's current (post-MultiStepLR-decay) LR each epoch
             # to avoid compounding the factor across epochs
             optimizer.param_groups[_A_DECODER_GROUP]["lr"] = (
-                optimizer.param_groups[0]["lr"] * cfg.diffusion.ttur_factor
+                optimizer.param_groups[0]["lr"] * cfg.train.prop_ttur_factor
             )
 
         # ema_a_decoder/ema_encoder deliberately NOT passed here -- val/diffusion_loss

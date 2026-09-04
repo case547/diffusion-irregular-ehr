@@ -37,7 +37,7 @@ def run_condition(
     val_loader = DataLoader(val_ds, batch_size=cfg.train.batch_size)
     test_loader = DataLoader(test_ds, batch_size=cfg.train.batch_size)
 
-    model = model_cls(cfg.model, cfg.diffusion).to(device)
+    model = model_cls(cfg.vae, cfg.diffusion).to(device)
     Path(cfg.train.checkpoint_dir).mkdir(parents=True, exist_ok=True)
 
     if isinstance(model, HybridModel) and cfg.diffusion.cf_anchor_weight > 0.0:
@@ -102,7 +102,7 @@ def _fit_propnet(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     all_x = torch.cat([ds.x for ds in datasets])
     all_a = torch.cat([ds.a for ds in datasets])
-    propnet = PropensityNet(n_unit_in=cfg.model.feature_dim, device=device)
+    propnet = PropensityNet(n_unit_in=cfg.vae.feature_dim, device=device)
     propnet.fit(all_x, all_a, log_fn=log_fn)
     logger.info("PropensityNet fitted on all data: train+val+test.")
     propnet.eval()
