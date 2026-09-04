@@ -36,5 +36,5 @@ class ADecoder(nn.Module):
         return logits
 
     def log_prob(self, z: torch.Tensor, a: torch.Tensor) -> torch.Tensor:
-        """Bernoulli log-prob (B,)."""
-        return Bernoulli(logits=self.forward(z)).log_prob(a)
+        """Bernoulli log-prob (B,). Accepts soft targets for label smoothing."""
+        return Bernoulli(logits=self.forward(z), validate_args=False).log_prob(a)

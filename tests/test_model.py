@@ -192,3 +192,59 @@ def test_cf_anchor_detached_from_aux_outcome():
     comps["diffusion_loss"].backward()
     assert model.denoiser.cond_proj.weight.grad is not None
     assert model.aux_outcome.trunk[0].weight.grad is None
+
+
+# ── a_decoder label smoothing ──────────────────────────────────────────────
+
+
+def test_a_decoder_label_smoothing_changes_log_pa_target():
+    """With smoothing on, log_pa must differ from the unsmoothed value on the SAME z --
+    spy on a_decoder.log_prob to capture the actual `a` tensor it was called with."""
+    cfg = DiffusionConfig(
+        num_steps=10,
+        beta_start=0.0001,
+        beta_end=0.02,
+        schedule="quad",
+        embedding_dim=16,
+        block_dim=16,
+        hidden_dim=32,
+        num_blocks=2,
+        a_decoder_label_smoothing=0.05,
+    )
+    model = HybridModel(MODEL_CFG, cfg)
+    x, a, y_fac, y_cf = _batch()
+    a = torch.tensor([0.0, 1.0, 0.0, 1.0])
+
+    captured = {}
+    original = model.a_decoder.log_prob
+
+    def spy(z, a_arg):
+        captured["a_arg"] = a_arg
+        return original(z, a_arg)
+
+    model.a_decoder.log_prob = spy
+    model.compute_loss(x, a, y_fac, y_cf)
+
+    expected = a * (1.0 - 2 * 0.05) + 0.05  # a=0 -> 0.05, a=1 -> 0.95
+    assert torch.allclose(captured["a_arg"], expected)
+    assert not torch.allclose(captured["a_arg"], a)
+
+
+def test_a_decoder_label_smoothing_is_noop_when_zero():
+    """Default a_decoder_label_smoothing=0.0 must reach a_decoder.log_prob with the raw,
+    unsmoothed `a` -- exact equality with today's behavior."""
+    model = HybridModel(MODEL_CFG, DIFF_CFG)  # a_decoder_label_smoothing defaults to 0.0
+    x, a, y_fac, y_cf = _batch()
+    a = torch.tensor([0.0, 1.0, 0.0, 1.0])
+
+    captured = {}
+    original = model.a_decoder.log_prob
+
+    def spy(z, a_arg):
+        captured["a_arg"] = a_arg
+        return original(z, a_arg)
+
+    model.a_decoder.log_prob = spy
+    model.compute_loss(x, a, y_fac, y_cf)
+
+    assert torch.equal(captured["a_arg"], a)
