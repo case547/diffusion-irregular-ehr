@@ -248,3 +248,191 @@ def test_a_decoder_label_smoothing_is_noop_when_zero():
     model.compute_loss(x, a, y_fac, y_cf)
 
     assert torch.equal(captured["a_arg"], a)
+
+
+# ── z-space IPW weight application ─────────────────────────────────────────
+
+
+def _ipw_cfg(**overrides):
+    kwargs = dict(
+        num_steps=10,
+        beta_start=0.0001,
+        beta_end=0.02,
+        schedule="quad",
+        embedding_dim=16,
+        block_dim=16,
+        hidden_dim=32,
+        num_blocks=2,
+        use_ipw=True,
+        ipw_ramp_start=0,
+        ipw_ramp_end=1,
+        ipw_clip_prop=0.1,
+        ipw_z_samples=2,
+        ipw_ema_decay=0.9,
+    )
+    kwargs.update(overrides)
+    return DiffusionConfig(**kwargs)
+
+
+def test_compute_phat_shape_and_range():
+    from ema_pytorch import EMA
+
+    cfg = _ipw_cfg()
+    model = HybridModel(MODEL_CFG, cfg)
+    ema_a_decoder = EMA(model.a_decoder, beta=0.9, update_after_step=0, update_every=1)
+    ema_encoder = EMA(model.encoder, beta=0.9, update_after_step=0, update_every=1)
+    ema_a_decoder.update()
+    ema_encoder.update()
+
+    x, a, y_fac, _ = _batch()
+    p_hat = model._compute_pi_hat(x, a, y_fac, ema_encoder, ema_a_decoder)
+    assert p_hat.shape == (B,)
+    assert torch.all(p_hat > 0.0) and torch.all(p_hat < 1.0)
+
+
+def test_compute_loss_uses_ipw_weight_when_active():
+    """With use_ipw active and past ramp_start, diffusion_loss must differ from the
+    unweighted formula on data engineered to trigger a non-trivial weight -- verified
+    by directly recomputing both versions from the same intercepted eps/eps_pred."""
+    from ema_pytorch import EMA
+
+    torch.manual_seed(6)
+    cfg = _ipw_cfg(ipw_ramp_start=0, ipw_ramp_end=1)
+    model = HybridModel(MODEL_CFG, cfg)
+    ema_a_decoder = EMA(model.a_decoder, beta=0.9, update_after_step=0, update_every=1)
+    ema_encoder = EMA(model.encoder, beta=0.9, update_after_step=0, update_every=1)
+    ema_a_decoder.update()
+    ema_encoder.update()
+
+    x, a, y_fac, y_cf = _batch()
+    a = torch.tensor([0.0, 1.0, 0.0, 1.0])
+
+    captured = {}
+    original_noise_targets = model._noise_targets
+
+    def noise_spy(batch_size, device, a_arg, y_fac_arg, y_cf_arg):
+        out = original_noise_targets(batch_size, device, a_arg, y_fac_arg, y_cf_arg)
+        captured["eps"], captured["factual_mask"] = out[2], out[3]
+        return out
+
+    model._noise_targets = noise_spy
+    original_denoiser_forward = model.denoiser.forward
+
+    def denoiser_spy(*args, **kwargs):
+        eps_pred = original_denoiser_forward(*args, **kwargs)
+        captured["eps_pred"] = eps_pred
+        return eps_pred
+
+    model.denoiser.forward = denoiser_spy
+
+    torch.manual_seed(6)
+    comps = model.compute_loss(
+        x, a, y_fac, y_cf, epoch=1, ema_a_decoder=ema_a_decoder, ema_encoder=ema_encoder
+    )
+
+    per_sample = (
+        ((captured["eps_pred"] - captured["eps"]) * captured["factual_mask"]) ** 2
+    ).sum(dim=1)
+    unweighted = per_sample.mean()
+
+    assert torch.isfinite(comps["diffusion_loss"])
+    # Only assert inequality when the weights are non-trivial (skip flaky equality-by-
+    # chance): with a freshly-initialised a_decoder the trim is unlikely to fire on
+    # every subject, so this should hold with the fixed seed above.
+    assert not torch.allclose(comps["diffusion_loss"], unweighted)
+
+
+def test_compute_loss_falls_back_to_unweighted_before_ramp_start():
+    """epoch < ipw_ramp_start must skip _compute_phat entirely (spied) and diffusion_loss
+    must equal the unweighted formula recomputed from the actual intercepted eps/eps_pred
+    -- not just two identically-seeded calls down what could be the same branch either way."""
+    from ema_pytorch import EMA
+
+    torch.manual_seed(7)
+    cfg = _ipw_cfg(ipw_ramp_start=5, ipw_ramp_end=10)
+    model = HybridModel(MODEL_CFG, cfg)
+    ema_a_decoder = EMA(model.a_decoder, beta=0.9, update_after_step=0, update_every=1)
+    ema_encoder = EMA(model.encoder, beta=0.9, update_after_step=0, update_every=1)
+    ema_a_decoder.update()
+    ema_encoder.update()
+
+    x, a, y_fac, y_cf = _batch()
+
+    captured = {}
+    original_noise_targets = model._noise_targets
+
+    def noise_spy(batch_size, device, a_arg, y_fac_arg, y_cf_arg):
+        out = original_noise_targets(batch_size, device, a_arg, y_fac_arg, y_cf_arg)
+        captured["eps"], captured["factual_mask"] = out[2], out[3]
+        return out
+
+    model._noise_targets = noise_spy
+    original_denoiser_forward = model.denoiser.forward
+
+    def denoiser_spy(*args, **kwargs):
+        eps_pred = original_denoiser_forward(*args, **kwargs)
+        captured["eps_pred"] = eps_pred
+        return eps_pred
+
+    model.denoiser.forward = denoiser_spy
+
+    phat_called = {"n": 0}
+    original_compute_phat = model._compute_pi_hat
+
+    def phat_spy(*args, **kwargs):
+        phat_called["n"] += 1
+        return original_compute_phat(*args, **kwargs)
+
+    model._compute_pi_hat = phat_spy
+
+    torch.manual_seed(7)
+    comps_ipw = model.compute_loss(
+        x, a, y_fac, y_cf, epoch=0, ema_a_decoder=ema_a_decoder, ema_encoder=ema_encoder
+    )
+
+    assert phat_called["n"] == 0
+    per_sample = (
+        ((captured["eps_pred"] - captured["eps"]) * captured["factual_mask"]) ** 2
+    ).sum(dim=1)
+    assert torch.allclose(comps_ipw["diffusion_loss"], per_sample.mean())
+
+
+def test_compute_loss_falls_back_to_unweighted_when_use_ipw_false():
+    """use_ipw=False must skip weighting even when EMA objects ARE supplied (the only
+    gate left is self._use_ipw) -- diffusion_loss must equal the unweighted formula
+    recomputed from the actual intercepted eps/eps_pred."""
+    from ema_pytorch import EMA
+
+    x, a, y_fac, y_cf = _batch()
+    model = HybridModel(MODEL_CFG, DIFF_CFG)  # use_ipw defaults to False
+    ema_a_decoder = EMA(model.a_decoder, beta=0.9, update_after_step=0, update_every=1)
+    ema_encoder = EMA(model.encoder, beta=0.9, update_after_step=0, update_every=1)
+    ema_a_decoder.update()
+    ema_encoder.update()
+
+    captured = {}
+    original_noise_targets = model._noise_targets
+
+    def noise_spy(batch_size, device, a_arg, y_fac_arg, y_cf_arg):
+        out = original_noise_targets(batch_size, device, a_arg, y_fac_arg, y_cf_arg)
+        captured["eps"], captured["factual_mask"] = out[2], out[3]
+        return out
+
+    model._noise_targets = noise_spy
+    original_denoiser_forward = model.denoiser.forward
+
+    def denoiser_spy(*args, **kwargs):
+        eps_pred = original_denoiser_forward(*args, **kwargs)
+        captured["eps_pred"] = eps_pred
+        return eps_pred
+
+    model.denoiser.forward = denoiser_spy
+
+    comps = model.compute_loss(
+        x, a, y_fac, y_cf, epoch=100, ema_a_decoder=ema_a_decoder, ema_encoder=ema_encoder
+    )
+
+    per_sample = (
+        ((captured["eps_pred"] - captured["eps"]) * captured["factual_mask"]) ** 2
+    ).sum(dim=1)
+    assert torch.allclose(comps["diffusion_loss"], per_sample.mean())
