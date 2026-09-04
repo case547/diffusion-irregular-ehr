@@ -5,10 +5,10 @@ class VAEConfig(BaseModel):
     feature_dim: int
     latent_dim: int
     hidden_dim: int
+    a_decoder_hidden_dim: int
     encoder_num_layers: int
     decoder_num_layers: int
     aux_num_layers: int
-    a_decoder_hidden_dim: int
     a_decoder_label_smoothing: float = Field(default=0.0, ge=0.0, lt=0.5)
 
 
@@ -27,7 +27,7 @@ class DiffusionConfig(BaseModel):
     ipw_ramp_start: int = 0
     ipw_ramp_end: int = 0
     ipw_clip_prop: float = 0.1
-    ipw_z_samples: int = 5
+    ipw_z_samples: int = 1
 
     @model_validator(mode="after")
     def _validate_ipw_fields(self) -> DiffusionConfig:
