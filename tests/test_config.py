@@ -18,7 +18,7 @@ def test_ipw_fields_have_inert_defaults():
     assert cfg.ipw_ramp_start == 0
     assert cfg.ipw_ramp_end == 0
     assert cfg.ipw_clip_prop == 0.1
-    assert cfg.ipw_z_samples == 5
+    assert cfg.ipw_z_samples == 1
 
 
 def test_ipw_fields_accept_overrides():
