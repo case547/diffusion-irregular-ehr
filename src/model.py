@@ -192,7 +192,7 @@ class HybridModel(_DiffusionBase):
 
         # Diffusion denoiser for y-space potential outcome model, conditioned on z and a
         self.denoiser = Denoiser(
-            latent_dim=vc.latent_dim,
+            input_dim=vc.latent_dim,
             block_dim=diffusion_cfg.block_dim,
             hidden_dim=diffusion_cfg.hidden_dim,
             embedding_dim=diffusion_cfg.embedding_dim,
@@ -361,7 +361,7 @@ class DiffPO(_DiffusionBase):
         super().__init__()
         vc = vae_cfg
         self.denoiser = Denoiser(
-            latent_dim=vc.feature_dim,  # cond_proj takes [a, x]: size feature_dim+1
+            input_dim=vc.feature_dim,  # cond_proj takes [a, x]: size feature_dim+1
             block_dim=diffusion_cfg.block_dim,
             hidden_dim=diffusion_cfg.hidden_dim,
             embedding_dim=diffusion_cfg.embedding_dim,
