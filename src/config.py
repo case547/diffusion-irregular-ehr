@@ -22,8 +22,8 @@ class DiffusionConfig(BaseModel):
     hidden_dim: int
     num_blocks: int
     clip_denoised: bool = False
-    use_ipw: bool = False
     cf_anchor_weight: float = 0.0
+    use_ipw: bool = False
     ipw_ramp_start: int = 0
     ipw_ramp_end: int = 0
     ipw_clip_prop: float = 0.1
