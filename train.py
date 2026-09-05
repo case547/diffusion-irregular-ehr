@@ -10,6 +10,7 @@ import torch
 from ema_pytorch import EMA
 from torch.optim import Adam
 from torch.utils.data import DataLoader
+from tqdm import trange
 
 from src.auxiliary import AuxOutcome
 from src.config import Config
@@ -334,7 +335,9 @@ def train_aux_outcome(
     log_fn: Callable | None = None,
     patience: int = 10,
     min_epochs: int = 200,
-) -> None:
+    propnet: PropensityNet | None = None,
+    diagnostic: bool = False,
+) -> None | tuple[list[float], list[float]]:
     """Train AuxOutcome standalone via factual-only NLL: -log_prob(x, a, y_fac).mean().
 
     Pre-trains AuxOutcome before it's handed to HybridModel's own training loop.
@@ -352,34 +355,57 @@ def train_aux_outcome(
         optimizer, milestones=[p0, p1, p2, p3], gamma=0.1
     )
 
+    train_loss_list = []
+    val_loss_list = []
+
     val_loss_best = float("inf")
     patience_left = patience
     best_state = None
     best_epoch = None
 
-    for epoch in range(cfg.train.epochs):
+    epoch_iterator = trange(cfg.train.epochs) if diagnostic else range(cfg.train.epochs)
+    for epoch in epoch_iterator:
         aux.train()
-        train_loss_sum, n_batches = 0.0, 0
+        train_loss_sum = 0.0
+        n_batches = 0
+
         for batch in train_loader:
             x, a, y = batch["x"].to(device), batch["a"].to(device), batch["y"].to(device)
             optimizer.zero_grad()
-            loss = -aux.log_prob(x, a, y).mean()
+
+            per_sample = -aux.log_prob(x, a, y)
+            if propnet is not None:
+                with torch.no_grad():
+                    ipw = propnet.get_importance_weights(x, a)
+                ipw = ipw.clamp(0.5, 3.0)
+                ipw = ipw / ipw.mean()
+                loss = (per_sample * ipw).mean()
+            else:
+                loss = per_sample.mean()
+
             loss.backward()
             torch.nn.utils.clip_grad_norm_(aux.parameters(), max_norm=1.0)
             optimizer.step()
             train_loss_sum += loss.item()
             n_batches += 1
+
         lr_scheduler.step()
 
         aux.eval()
-        val_loss_sum, n_val_batches = 0.0, 0
+        val_loss_sum = 0.0
+        n_val_batches = 0
         with torch.no_grad():
             for batch in val_loader:
                 x, a, y = batch["x"].to(device), batch["a"].to(device), batch["y"].to(device)
                 val_loss_sum += (-aux.log_prob(x, a, y).mean()).item()
                 n_val_batches += 1
 
-        train_loss, val_loss = train_loss_sum / n_batches, val_loss_sum / n_val_batches
+        train_loss = train_loss_sum / n_batches
+        val_loss = val_loss_sum / n_val_batches
+        if diagnostic:
+            train_loss_list.append(train_loss)
+            val_loss_list.append(val_loss)
+
         if log_fn is not None:
             log_fn(
                 {
@@ -413,3 +439,6 @@ def train_aux_outcome(
 
     if best_epoch is not None:
         logger.info("AuxOutcome pretrain: Restored best model from epoch %d", best_epoch + 1)
+
+    if diagnostic:
+        return train_loss_list, val_loss_list

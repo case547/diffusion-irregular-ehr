@@ -10,6 +10,7 @@ class VAEConfig(BaseModel):
     decoder_num_layers: int
     aux_num_layers: int
     a_decoder_label_smoothing: float = Field(default=0.0, ge=0.0, lt=0.5)
+    use_aux_propnet: bool = False
 
 
 class DiffusionConfig(BaseModel):
