@@ -1,3 +1,6 @@
+import pytest
+from pydantic import ValidationError
+
 from src.config import DiffusionConfig
 
 BASE_KWARGS = dict(
@@ -19,6 +22,7 @@ def test_ipw_fields_have_inert_defaults():
     assert cfg.ipw_ramp_end == 0
     assert cfg.ipw_clip_prop == 0.1
     assert cfg.ipw_z_samples == 1
+    assert cfg.use_dr_blend is False
 
 
 def test_ipw_fields_accept_overrides():
@@ -34,3 +38,15 @@ def test_ipw_fields_accept_overrides():
     assert cfg.ipw_ramp_end == 300
     assert cfg.ipw_clip_prop == 0.05
     assert cfg.ipw_z_samples == 3
+
+
+def test_use_dr_blend_requires_use_ipw():
+    with pytest.raises(ValidationError):
+        DiffusionConfig(**BASE_KWARGS, use_ipw=False, use_dr_blend=True)
+
+
+def test_use_dr_blend_allowed_when_use_ipw_true():
+    cfg = DiffusionConfig(
+        **BASE_KWARGS, use_ipw=True, ipw_ramp_start=0, ipw_ramp_end=1, use_dr_blend=True
+    )
+    assert cfg.use_dr_blend is True
