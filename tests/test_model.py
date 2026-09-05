@@ -404,6 +404,111 @@ def test_compute_loss_uses_ipw_weight_when_active():
     assert not torch.allclose(comps["diffusion_loss"], unweighted)
 
 
+def test_compute_loss_dr_blend_differs_from_unweighted():
+    """With use_dr_blend active and past ramp_start, diffusion_loss must differ from the
+    unweighted formula on data engineered to trigger a non-trivial weight -- verified by
+    directly recomputing the unweighted version from the same intercepted real-pass
+    eps/eps_pred (mirrors test_compute_loss_uses_ipw_weight_when_active's pattern)."""
+    from ema_pytorch import EMA
+
+    torch.manual_seed(9)
+    cfg = _ipw_diff_cfg(ipw_ramp_start=0, ipw_ramp_end=1, use_dr_blend=True)
+    model = HybridModel(VAE_CFG, cfg)
+    ema_a_decoder = EMA(model.a_decoder, beta=0.9, update_after_step=0, update_every=1)
+    ema_encoder = EMA(model.encoder, beta=0.9, update_after_step=0, update_every=1)
+    ema_a_decoder.update()
+    ema_encoder.update()
+
+    x, a, y_fac, y_cf = _batch()
+    a = torch.tensor([0.0, 1.0, 0.0, 1.0])
+
+    captured = {}
+    original_noise_targets = model._noise_targets
+
+    def noise_spy(batch_size, device, a_arg, y_fac_arg, y_cf_arg):
+        out = original_noise_targets(batch_size, device, a_arg, y_fac_arg, y_cf_arg)
+        captured["eps"], captured["factual_mask"] = out[2], out[3]
+        return out
+
+    model._noise_targets = noise_spy
+
+    calls = {"n": 0}
+    original_denoiser_forward = model.denoiser.forward
+
+    def denoiser_spy(*args, **kwargs):
+        eps_pred = original_denoiser_forward(*args, **kwargs)
+        calls["n"] += 1
+        if calls["n"] == 1:
+            captured["eps_pred_real"] = eps_pred
+        else:
+            # Denoiser.output_projection2.weight is zero-initialised (a deliberate
+            # stable-start trick), so a freshly-constructed denoiser's output is nearly
+            # insensitive to its input at every layer -- the real and pseudo passes would
+            # be numerically indistinguishable and the blend would collapse to the
+            # unweighted mean for ANY w_eff. Perturb only the second (pseudo) call's
+            # output so the two per-sample terms are genuinely distinct, isolating what
+            # this test actually checks: that compute_loss's blend arithmetic combines
+            # two differing per-sample terms correctly, not the denoiser's sensitivity.
+            eps_pred = eps_pred + 0.7
+        return eps_pred
+
+    model.denoiser.forward = denoiser_spy
+
+    torch.manual_seed(9)
+    comps = model.compute_loss(
+        x, a, y_fac, y_cf, epoch=1, ema_a_decoder=ema_a_decoder, ema_encoder=ema_encoder
+    )
+
+    per_sample_real = (
+        ((captured["eps_pred_real"] - captured["eps"]) * captured["factual_mask"]) ** 2
+    ).sum(dim=1)
+    unweighted = per_sample_real.mean()
+
+    assert torch.isfinite(comps["diffusion_loss"])
+    assert calls["n"] == 2  # real pass + pseudo pass
+    # Only assert inequality when the weights are non-trivial (skip flaky equality-by-
+    # chance): with a freshly-initialised a_decoder the trim is unlikely to fire on
+    # every subject, so this should hold with the fixed seed above.
+    assert not torch.allclose(comps["diffusion_loss"], unweighted)
+
+
+def test_compute_loss_dr_blend_reuses_same_tau_and_eps_for_pseudo_pass():
+    """The pseudo (plug-in) forward pass must reuse the SAME tau/eps as the real pass --
+    a paired comparison, isolating the target as the only thing that differs. Spy on
+    _apply_noise directly, since that's the exact call both passes share."""
+    from ema_pytorch import EMA
+
+    torch.manual_seed(10)
+    cfg = _ipw_diff_cfg(ipw_ramp_start=0, ipw_ramp_end=1, use_dr_blend=True)
+    model = HybridModel(VAE_CFG, cfg)
+    ema_a_decoder = EMA(model.a_decoder, beta=0.9, update_after_step=0, update_every=1)
+    ema_encoder = EMA(model.encoder, beta=0.9, update_after_step=0, update_every=1)
+    ema_a_decoder.update()
+    ema_encoder.update()
+
+    x, a, y_fac, y_cf = _batch()
+    a = torch.tensor([0.0, 1.0, 0.0, 1.0])
+
+    captured_calls = []
+    original_apply_noise = model._apply_noise
+
+    def apply_noise_spy(y_both, tau, eps):
+        captured_calls.append((tau.clone(), eps.clone()))
+        return original_apply_noise(y_both, tau, eps)
+
+    model._apply_noise = apply_noise_spy
+
+    model.compute_loss(
+        x, a, y_fac, y_cf, epoch=1, ema_a_decoder=ema_a_decoder, ema_encoder=ema_encoder
+    )
+
+    assert len(captured_calls) == 2  # real pass + pseudo pass
+    tau_real, eps_real = captured_calls[0]
+    tau_pseudo, eps_pseudo = captured_calls[1]
+    assert torch.equal(tau_real, tau_pseudo)
+    assert torch.equal(eps_real, eps_pseudo)
+
+
 def test_compute_loss_falls_back_to_unweighted_before_ramp_start():
     """epoch < ipw_ramp_start must skip _compute_phat entirely (spied) and diffusion_loss
     must equal the unweighted formula recomputed from the actual intercepted eps/eps_pred
