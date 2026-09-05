@@ -6,15 +6,28 @@ Diagnostics (ESS, calibration).
 import torch
 
 
-def zspace_ipw_weight(pi_hat: torch.Tensor, a: torch.Tensor, clip_prop: float) -> torch.Tensor:
-    """Asymmetric arm-conditional trim, then normalise to mean 1.
+def zspace_ipw_weight(
+    pi_hat: torch.Tensor,
+    a: torch.Tensor,
+    clip_prop: float,
+    *,
+    trim_to_zero: bool = False,
+    normalize: bool = True,
+) -> torch.Tensor:
+    """Asymmetric arm-conditional trim, then (by default) normalise to mean 1.
 
     w = a/pi_hat + (1-a)/(1-pi_hat) only explodes as pi_hat->0 for treated subjects, and
     as pi_hat->1 for untreated subjects. Trimming is scoped to exactly those two cases,
     not a blanket band on pi_hat regardless of arm.
 
-    Trimmed subjects fall back to raw weight 1 (not 0) so no training signal is lost; only
-    the correction for that subject is declined.
+    trim_to_zero: if False (default), trimmed subjects fall back to raw weight 1, so no
+        training signal is lost; only the correction for that subject is declined. If
+        True, trimmed subjects fall back to 0 -- only safe when paired with a compensating
+        signal for that subject elsewhere (e.g. the doubly-robust blend's plug-in term).
+    normalize: if True (default), rescale to mean 1 across the batch. Set False for the
+        doubly-robust blend, which needs the raw (unnormalised) weight for its AIPW-style
+        correction -- renormalising would break the population-level unbiasedness property
+        that makes the correction doubly robust in the first place.
 
     Shapes: `pi_hat`, `a`, and the return are all (B,).
 
@@ -24,8 +37,9 @@ def zspace_ipw_weight(pi_hat: torch.Tensor, a: torch.Tensor, clip_prop: float) -
     """
     raw_w = a / pi_hat + (1 - a) / (1 - pi_hat)
     overlap_ok = ((a == 1) & (pi_hat >= clip_prop)) | ((a == 0) & ((1 - pi_hat) >= clip_prop))
-    w = torch.where(overlap_ok, raw_w, torch.ones_like(raw_w))
-    return w / w.mean()
+    fallback = torch.zeros_like(raw_w) if trim_to_zero else torch.ones_like(raw_w)
+    w = torch.where(overlap_ok, raw_w, fallback)
+    return w / w.mean() if normalize else w
 
 
 def ramp_weight(
@@ -33,8 +47,14 @@ def ramp_weight(
 ) -> torch.Tensor:
     """Linearly interpolate w toward 1.0 between ramp_start and ramp_end (epochs).
 
-    Mean-preserving for any ramp value as long as w itself already has mean 1 (true
-    of `zspace_ipw_weight`'s output): E[1 + ramp*(w-1)] = 1 + ramp*(E[w]-1) = 1
+    Mean-preserving for any ramp value as long as w itself already has mean 1 (true of
+    `zspace_ipw_weight`'s output when `normalize=True`, its default -- not true when
+    called with `normalize=False`, e.g. for the doubly-robust blend):
+
+        E[1 + ramp*(w-1)] = 1 + ramp*(E[w]-1) = 1
+
+    The interpolation itself is correct either way: ramp=0 always yields w_eff=1 (no
+    correction), ramp=1 always yields the full w.
     """
     ramp = min(1.0, max(0.0, (curr_epoch - ramp_start) / (ramp_end - ramp_start)))
     return 1.0 + ramp * (w - 1.0)
