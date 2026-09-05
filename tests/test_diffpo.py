@@ -95,3 +95,27 @@ def test_sample_outcomes_clip_val_bounds_output():
     assert y1_clipped.abs().max() <= 6.0
     assert torch.isfinite(y0_clipped).all()
     assert torch.isfinite(y1_clipped).all()
+
+
+def test_ddpm_reverse_without_log_trajectory_returns_tensor():
+    model = DiffPO(VAE_CFG, DIFF_CFG)
+    x = torch.randn(B, F)
+    a = torch.randint(0, 2, (B,)).float()
+    y = model._ddpm_reverse(B, x, a, torch.device("cpu"))
+    assert isinstance(y, torch.Tensor)
+    assert y.shape == (B, 2)
+
+
+def test_ddpm_reverse_log_trajectory_shapes():
+    model = DiffPO(VAE_CFG, DIFF_CFG)
+    x = torch.randn(B, F)
+    a = torch.randint(0, 2, (B,)).float()
+    y_final, y_traj, eps_traj = model._ddpm_reverse(
+        B, x, a, torch.device("cpu"), log_trajectory=True
+    )
+    assert y_final.shape == (B, 2)
+    assert y_traj.shape == (DIFF_CFG.num_steps, B, 2)
+    assert eps_traj.shape == (DIFF_CFG.num_steps, B, 2)
+    assert torch.isfinite(y_final).all()
+    assert torch.isfinite(y_traj).all()
+    assert torch.isfinite(eps_traj).all()
