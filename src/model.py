@@ -213,20 +213,21 @@ class HybridModel(_DiffusionBase):
     def _apply_cf_anchor(
         self, x: torch.Tensor, a: torch.Tensor, y_cf: torch.Tensor
     ) -> tuple[torch.Tensor, bool]:
-        """Leak-free counterfactual-slot substitution, anchored to a pre-trained (but
-        still continuously training, per its own log_ry term) AuxOutcome's per-subject
-        prediction.
+        """Leak-free counterfactual-slot substitution, anchored to a pre-trained
+        AuxOutcome's per-subject prediction.
 
-        Returns (cf_target, anchor_active). Detached: gradient reaches only the denoiser,
-        never aux_outcome, which is trained solely via its own log_ry term -- avoids the
-        two components co-adapting into a mutually-reinforcing but inaccurate state.
+        Detached: gradient reaches only the denoiser, never aux_outcome, which is
+        trained solely via its own log_ry term -- avoids the two components co-
+        adapting into a mutually-reinforcing but inaccurate state.
+
+        Returns (cf_target, anchor_active).
         """
         anchor_active = self._cf_anchor_weight > 0.0
         if not anchor_active:
             return y_cf, False
         with torch.no_grad():
-            cf_target = self.aux_outcome.mean(x, 1.0 - a)
-        return cf_target, True
+            y_cf_pseudo = self.aux_outcome.mean(x, 1.0 - a)
+        return y_cf_pseudo, True
 
     def _compute_pi_hat(
         self,
