@@ -217,8 +217,8 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# Plans
-**/superpowers/plans/
+# Documents
+docs/
 
 # Runs
 checkpoints/
