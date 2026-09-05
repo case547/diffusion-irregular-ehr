@@ -49,7 +49,13 @@ def run_condition(
             else lambda d, step: log_fn({**d, "pretrain_aux/step": step}, step)
         )
         train_aux_outcome(
-            model.aux_outcome, train_loader, val_loader, cfg, device, log_fn=pretrain_log_fn
+            model.aux_outcome,
+            train_loader,
+            val_loader,
+            cfg,
+            device,
+            log_fn=pretrain_log_fn,
+            propnet=propnet,
         )
         # Freeze: aux_outcome depends only on (x, a, y), so it has nothing to gain from
         # continued joint training. I also saw that validation log_ry degrade slightly
@@ -186,7 +192,7 @@ if __name__ == "__main__":
             run.define_metric("pretrain_aux/*", step_metric="pretrain_aux/step")
 
             propnet = None
-            if model_cls is DiffPO:
+            if model_cls is DiffPO or rep_cfg.vae.use_aux_propnet:
                 propnet = _fit_propnet(
                     rep_cfg,
                     train_ds,
