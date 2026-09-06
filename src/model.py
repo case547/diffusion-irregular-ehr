@@ -331,9 +331,11 @@ class HybridModel(_DiffusionBase):
         """Leak-free counterfactual-slot substitution, anchored to a pre-trained
         AuxOutcome's per-subject prediction.
 
-        Detached: gradient reaches only the denoiser, never aux_outcome, which is
-        trained solely via its own log_ry term -- avoids the two components co-
-        adapting into a mutually-reinforcing but inaccurate state.
+        Detached: gradient from this anchor reaches only the denoiser, never aux_outcome
+        via this path -- avoids the two components co-adapting into a mutually-
+        reinforcing but inaccurate state. (Whether aux_outcome receives gradient from any
+        other source depends on cf_anchor_weight/use_dr_blend and whether it has since
+        been frozen -- see experiment.py.)
 
         Returns (cf_target, anchor_active).
         """

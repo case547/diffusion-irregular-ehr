@@ -64,9 +64,14 @@ def effective_sample_size(w: torch.Tensor) -> float:
     """ESS = (sum w)^2 / sum(w^2).
 
     Equals len(w) when all weights are equal; collapses toward the count of a few
-    dominant weights otherwise.
+    dominant weights otherwise. Returns 0.0 (not NaN) when every weight is exactly zero
+    (e.g. an entire batch trimmed under `trim_to_zero=True`) -- an all-zero-weight batch
+    genuinely has zero effective samples.
     """
-    return (w.sum() ** 2 / (w**2).sum()).item()
+    denom = (w**2).sum()
+    if denom == 0:
+        return 0.0
+    return (w.sum() ** 2 / denom).item()
 
 
 def calibration_diagnostic(

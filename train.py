@@ -78,7 +78,11 @@ def _log_ipw_diagnostics(
     calls but the values summarise the pass just completed. Also, the logged `ipw/ess`
     is computed from the un-ramped zspace_ipw_weight output below, not the actual
     ramp_weight-adjusted weights driving that epoch's loss -- so during ramp-up
-    epochs, logged ESS is lower than the true in-loss ESS.
+    epochs, logged ESS is lower than the true in-loss ESS. Under `use_dr_blend=True`,
+    `ipw/ess` is additionally computed from an unnormalised, trimmed-to-zero weight
+    (matching `compute_loss`'s own DR-blend branch), not the mean-1-normalised weight
+    used when `use_dr_blend=False` -- the two are not on the same scale and should not
+    be compared directly across runs with different `use_dr_blend` settings.
     """
     was_training = model.training
     model.eval()
