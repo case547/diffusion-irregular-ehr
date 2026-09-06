@@ -11,7 +11,7 @@ from src.decoders import ADecoder, XDecoder
 from src.denoiser import Denoiser
 from src.encoder import ZEncoder
 from src.propensity import PropensityNet
-from src.zspace_ipw import ramp_weight, zspace_ipw_weight
+from src.zspace_ipw import dr_blend_loss, ramp_weight, zspace_ipw_weight
 
 
 class _DiffusionBase(nn.Module, ABC):
@@ -437,13 +437,10 @@ class HybridModel(_DiffusionBase):
                 eps_pred_pseudo: torch.Tensor = self.denoiser(noisy_y_pseudo, tau, z, a)
                 per_sample_pseudo = (((eps_pred_pseudo - eps) * gradient_mask) ** 2).sum(dim=1)
 
-                # AIPW-shaped correction, not a 0-1 blend: w_eff can exceed 1 (unnormalised,
-                # up to ~1/clip_prop), making (1-w_eff) negative for some subjects -- this is
-                # the actual AIPW estimator structure (ipw*y + (1-ipw)*mu, from
-                # (a/pi)*(y-mu)+mu expanded), not a bug.
-                diffusion_loss = (
-                    w_eff * per_sample + (1.0 - w_eff) * per_sample_pseudo
-                ).mean()
+                # Clamped, not the textbook unclamped AIPW formula -- see dr_blend_loss's
+                # own docstring and the spec's "Post-implementation finding" section for why
+                # the unclamped version is unbounded below and diverges in training.
+                diffusion_loss = dr_blend_loss(w_eff, per_sample, per_sample_pseudo).mean()
             else:
                 w = zspace_ipw_weight(pi_hat, a, self._ipw_clip_prop)
                 w_eff = ramp_weight(w, epoch, self._ipw_ramp_start, self._ipw_ramp_end)

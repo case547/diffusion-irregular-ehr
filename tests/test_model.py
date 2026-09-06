@@ -617,3 +617,76 @@ def test_apply_noise_matches_manual_formula():
     ab_tau = model.alpha_bar_sched[tau].unsqueeze(1)
     expected = ab_tau.sqrt() * y_both + (1.0 - ab_tau).sqrt() * eps
     assert torch.allclose(noisy_y, expected)
+
+
+def test_compute_loss_dr_blend_uses_dr_blend_loss_formula():
+    """compute_loss's DR-blend branch must actually combine per_sample_real/per_sample_pseudo
+    via dr_blend_loss's clamped formula, not the original unclamped one -- verified by
+    capturing the real w_eff (via a spy on ramp_weight, src.model's own imported reference)
+    and both denoiser outputs, then recomputing the expected value directly from
+    dr_blend_loss and asserting exact equality against the actual diffusion_loss."""
+    from ema_pytorch import EMA
+
+    import src.model as model_module
+    from src.zspace_ipw import dr_blend_loss
+
+    torch.manual_seed(14)
+    cfg = _ipw_diff_cfg(ipw_ramp_start=0, ipw_ramp_end=1, use_dr_blend=True)
+    model = HybridModel(VAE_CFG, cfg)
+    ema_a_decoder = EMA(model.a_decoder, beta=0.9, update_after_step=0, update_every=1)
+    ema_encoder = EMA(model.encoder, beta=0.9, update_after_step=0, update_every=1)
+    ema_a_decoder.update()
+    ema_encoder.update()
+
+    x, a, y_fac, y_cf = _batch()
+    a = torch.tensor([0.0, 1.0, 0.0, 1.0])
+
+    captured = {}
+    original_noise_targets = model._noise_targets
+
+    def noise_spy(batch_size, device, a_arg, y_fac_arg, y_cf_arg):
+        out = original_noise_targets(batch_size, device, a_arg, y_fac_arg, y_cf_arg)
+        captured["eps"], captured["factual_mask"] = out[2], out[3]
+        return out
+
+    model._noise_targets = noise_spy
+
+    eps_preds = []
+    original_denoiser_forward = model.denoiser.forward
+
+    def denoiser_spy(*args, **kwargs):
+        eps_pred = original_denoiser_forward(*args, **kwargs)
+        eps_preds.append(eps_pred)
+        return eps_pred
+
+    model.denoiser.forward = denoiser_spy
+
+    original_ramp_weight = model_module.ramp_weight
+    captured_w_eff = []
+
+    def ramp_weight_spy(*args, **kwargs):
+        w_eff = original_ramp_weight(*args, **kwargs)
+        captured_w_eff.append(w_eff)
+        return w_eff
+
+    model_module.ramp_weight = ramp_weight_spy
+    try:
+        comps = model.compute_loss(
+            x, a, y_fac, y_cf, epoch=1, ema_a_decoder=ema_a_decoder, ema_encoder=ema_encoder
+        )
+    finally:
+        model_module.ramp_weight = original_ramp_weight
+
+    assert len(eps_preds) == 2  # real pass + pseudo pass
+    assert len(captured_w_eff) == 1
+    w_eff = captured_w_eff[0]
+
+    per_sample_real = (
+        ((eps_preds[0] - captured["eps"]) * captured["factual_mask"]) ** 2
+    ).sum(dim=1)
+    per_sample_pseudo = (
+        ((eps_preds[1] - captured["eps"]) * captured["factual_mask"]) ** 2
+    ).sum(dim=1)
+    expected = dr_blend_loss(w_eff, per_sample_real, per_sample_pseudo).mean()
+
+    assert torch.allclose(comps["diffusion_loss"], expected)

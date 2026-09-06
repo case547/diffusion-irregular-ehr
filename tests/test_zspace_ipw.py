@@ -2,6 +2,7 @@ import torch
 
 from src.zspace_ipw import (
     calibration_diagnostic,
+    dr_blend_loss,
     effective_sample_size,
     ramp_weight,
     zspace_ipw_weight,
@@ -143,3 +144,48 @@ def test_zspace_ipw_weight_normalize_false_keeps_raw_scale():
     raw = a / p_hat + (1 - a) / (1 - p_hat)
     assert torch.allclose(w, raw)
     assert not torch.allclose(w.mean(), torch.tensor(1.0))  # NOT renormalised
+
+
+def test_dr_blend_loss_clamps_to_single_term_when_w_eff_exceeds_one():
+    """w_eff > 1 (well-overlapped subject) is exactly the regime that made the unclamped
+    formula unbounded below -- pseudo_coef must clamp to 0 regardless of how large a
+    mismatch per_sample_pseudo represents, and the result must reduce to w_eff *
+    per_sample_real alone (identical to the single-term reweighting formula)."""
+    w_eff = torch.tensor([2.5])
+    per_sample_real = torch.tensor([0.1])
+    per_sample_pseudo = torch.tensor([1000.0])  # deliberately huge mismatch
+    loss = dr_blend_loss(w_eff, per_sample_real, per_sample_pseudo)
+    assert torch.all(loss >= 0.0)
+    assert torch.allclose(loss, w_eff * per_sample_real)
+
+
+def test_dr_blend_loss_full_plugin_reliance_when_w_eff_is_zero():
+    """w_eff == 0 (fully trimmed subject) must give pseudo_coef == 1 -- full reliance on
+    the plug-in term, exactly the boundary behaviour the design always intended."""
+    w_eff = torch.tensor([0.0])
+    per_sample_real = torch.tensor([5.0])
+    per_sample_pseudo = torch.tensor([3.0])
+    loss = dr_blend_loss(w_eff, per_sample_real, per_sample_pseudo)
+    assert torch.allclose(loss, per_sample_pseudo)
+
+
+def test_dr_blend_loss_matches_unclamped_formula_when_w_eff_below_one():
+    """For w_eff in (0, 1), the clamp is inert (1 - w_eff is already >= 0), so this must
+    match the original (unclamped) blend formula exactly."""
+    w_eff = torch.tensor([0.4])
+    per_sample_real = torch.tensor([2.0])
+    per_sample_pseudo = torch.tensor([1.0])
+    loss = dr_blend_loss(w_eff, per_sample_real, per_sample_pseudo)
+    expected = 0.4 * 2.0 + (1.0 - 0.4) * 1.0
+    assert torch.allclose(loss, torch.tensor([expected]))
+
+
+def test_dr_blend_loss_batched_and_nonnegative():
+    """Mixed batch -- some subjects above 1, some below, some at 0 -- must be entirely
+    non-negative regardless of how large the per-sample mismatches are."""
+    w_eff = torch.tensor([0.0, 0.5, 1.0, 3.0])
+    per_sample_real = torch.tensor([1.0, 1.0, 1.0, 1.0])
+    per_sample_pseudo = torch.tensor([50.0, 50.0, 50.0, 50.0])
+    loss = dr_blend_loss(w_eff, per_sample_real, per_sample_pseudo)
+    assert torch.all(loss >= 0.0)
+    assert torch.all(torch.isfinite(loss))

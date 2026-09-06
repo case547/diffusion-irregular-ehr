@@ -93,3 +93,27 @@ def calibration_diagnostic(
 
     out["calib_mae"] = sum(errs) / len(errs)
     return out
+
+
+def dr_blend_loss(
+    w_eff: torch.Tensor, per_sample_real: torch.Tensor, per_sample_pseudo: torch.Tensor
+) -> torch.Tensor:
+    """Combine real and plug-in per-sample diffusion losses via a clamped AIPW-shaped blend.
+
+    pseudo_coef = clamp(1 - w_eff, min=0), NOT the textbook unclamped (1 - w_eff): classical
+    AIPW's negatively-weighted term multiplies a FIXED nuisance function, but here
+    per_sample_pseudo is the SAME trainable model's own loss (its target is frozen, but its
+    prediction is not) -- an unclamped negative coefficient lets gradient descent drive
+    per_sample_pseudo, and hence the loss, to -inf with no bound. Clamping keeps both terms
+    non-negative (each per_sample* is itself a sum of squared errors) while preserving the
+    intended boundary case: w_eff=0 (fully trimmed) still gives pseudo_coef=1, full reliance
+    on the plug-in term.
+
+    For w_eff > 1 (well-overlapped subjects), pseudo_coef clamps to exactly 0 and this
+    reduces to w_eff * per_sample_real alone -- identical to the single-term reweighting
+    formula for those subjects; the two-term blend only genuinely activates for w_eff <= 1.
+
+    Shapes: `w_eff`, `per_sample_real`, `per_sample_pseudo`, and the return are all (B,).
+    """
+    pseudo_coef = torch.clamp(1.0 - w_eff, min=0.0)
+    return w_eff * per_sample_real + pseudo_coef * per_sample_pseudo
