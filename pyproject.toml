@@ -25,6 +25,7 @@ dev = [
     "pytest>=9.1.1",
     "ruff>=0.15.20",
     "seaborn>=0.13.2",
+    "statsmodels>=0.15.0",
 ]
 
 [[tool.uv.index]]
