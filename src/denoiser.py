@@ -135,6 +135,7 @@ class Denoiser(nn.Module):
         h = F.relu(self.output_projection1(h))  # [B, hidden_dim]
         h = F.relu(self.output_projection2(h))  # [B, hidden_dim]
 
-        y0 = self.output_y0(F.relu(self.y0_layer(h)))  # [B, 1]
-        y1 = self.output_y1(F.relu(self.y1_layer(h)))  # [B, 1]
-        return torch.cat([y0, y1], dim=1)
+        # Return noise predictions for the two POs
+        eps_y0 = self.output_y0(F.relu(self.y0_layer(h)))  # [B, 1]
+        eps_y1 = self.output_y1(F.relu(self.y1_layer(h)))  # [B, 1]
+        return torch.cat([eps_y0, eps_y1], dim=1)
