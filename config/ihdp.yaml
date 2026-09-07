@@ -1,6 +1,6 @@
 vae:
   feature_dim: 25  # IHDP has 25 covariates
-  latent_dim: 20   # dim(z); CEVAE paper default
+  latent_dim: 20   # dim(z)
   hidden_dim: 64            # hidden layer width; proportionate to latent_dim=20 and ~550 training subjects
   a_decoder_hidden_dim: 10  # hidden layer width of a_decoder
   encoder_num_layers: 2  # number of hidden layers in encoder MLP
