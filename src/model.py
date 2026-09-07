@@ -230,10 +230,10 @@ class HybridModel(_DiffusionBase):
       F = E_z[log p_ψ(x|z) + log p_ψ(a|z)]
           - KL[r_φ(z|x,a,y) ‖ N(0,I)]
           - E_z,τ,ε[‖ε - ε_θ(y_τ,τ|z,a)‖²]
-          + log r_φ(y|x,a)
 
-    No IPW weighting: unconfoundedness at x doesn't hold under hidden confounding, so an
-    x-space PropensityNet would estimate the wrong propensity here (unlike DiffPO's).
+    Under hidden confounding, unconfoundedness only holds through z, not x. So to get
+    the right propensity estimates, IPW must be applied in z-space rather than x-space.
+    This is done with a_decoder, whose influence ramps up over the training period.
     """
 
     def __init__(self, vae_cfg: VAEConfig, diffusion_cfg: DiffusionConfig):
