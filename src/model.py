@@ -118,7 +118,7 @@ class _DiffusionBase(nn.Module, ABC):
         clip_val: float | None = None,
         log_trajectory: bool = False,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """DDPM reverse loop. cond is z (DiffPOCEVAE) or x_rep (DiffPO). Returns (BK,2).
+        """DDPM reverse loop. cond is z (HybridModel) or x_rep (DiffPO). Returns (BK,2).
 
         When log_trajectory=True, returns (y, y_traj, eps_traj) instead: y is (BK,2) as
         above, and y_traj/eps_traj are each (L,BK,2), logging the state entering each step
@@ -181,7 +181,7 @@ class _DiffusionBase(nn.Module, ABC):
         clip_val: float | None = None,
         log_trajectory: bool = False,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Deterministic (eta=0) DDIM reverse loop. cond is z (DiffPOCEVAE) or x_rep (DiffPO).
+        """Deterministic (eta=0) DDIM reverse loop. cond is z (HybridModel) or x_rep (DiffPO).
         See https://arxiv.org/abs/2010.02502 for details.
 
         y_init, if given, is used as the starting noise y_L instead of a fresh torch.randn
@@ -224,7 +224,7 @@ class _DiffusionBase(nn.Module, ABC):
 
 class HybridModel(_DiffusionBase):
     """
-    DiffPO-CEVAE: diffusion potential outcome model with latent hidden confounder.
+    Combining a VAE and a diffusion model for causal inference under latent confounding.
 
     Objective (maximise):
       F = E_z[log p_ψ(x|z) + log p_ψ(a|z)]
@@ -376,6 +376,8 @@ class HybridModel(_DiffusionBase):
         else:
             diffusion_loss = per_sample.mean()
 
+        # We freeze the aux_outcome after its pre-train but keep this here
+        # for completeness and to allow for future fine-tuning if desired.
         log_ry = self.aux_outcome.log_prob(x, a, y_fac).mean()
 
         out = {
