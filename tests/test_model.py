@@ -78,6 +78,32 @@ def test_sample_outcomes_shapes():
     assert torch.isfinite(y1).all()
 
 
+def test_encode_cond_shape_and_deterministic():
+    model = HybridModel(VAE_CFG, DIFF_CFG)
+    model.eval()
+    x = torch.randn(B, F)
+    a = torch.randint(0, 2, (B,)).float()
+    c1 = model.encode_cond(x, a)
+    c2 = model.encode_cond(x, a)
+    assert c1.shape == (B, VAE_CFG.latent_dim)
+    assert torch.equal(c1, c2)  # posterior mean -- no randn
+    assert torch.isfinite(c1).all()
+
+
+def test_sample_ddim_shapes_and_shared_y_init():
+    model = HybridModel(VAE_CFG, DIFF_CFG)
+    model.eval()
+    x = torch.randn(B, F)
+    a = torch.randint(0, 2, (B,)).float()
+    y_init = torch.randn(B, 2)
+    y, y_traj, eps_traj = model.sample_ddim(x, a, y_init=y_init, log_trajectory=True)
+    assert y.shape == (B, 2)
+    assert y_traj.shape == (DIFF_CFG.num_steps, B, 2)
+    assert eps_traj.shape == (DIFF_CFG.num_steps, B, 2)
+    y2 = model.sample_ddim(x, a, y_init=y_init)
+    assert torch.equal(y, y2)
+
+
 # ── cf population-mean anchor ───────────────────────────────────────────────
 
 
