@@ -40,6 +40,14 @@ class _DiffusionBase(nn.Module, ABC):
         self, x: torch.Tensor, a: torch.Tensor, K: int = 50, clip_val: float | None = None
     ) -> tuple[torch.Tensor, torch.Tensor]: ...
 
+    @abstractmethod
+    def encode_cond(self, x: torch.Tensor, a: torch.Tensor) -> torch.Tensor:
+        """Per-subject denoiser conditioning, (B, cond_dim).
+
+        DiffPO returns x; HybridModel returns the encoder posterior mean. Deterministic.
+        """
+        ...
+
     @staticmethod
     def cosine_beta_schedule(timesteps: int, s=0.008) -> np.ndarray:
         """Cosine schedule as proposed in Improved Denoising Diffusion Probabilistic Models.
@@ -120,6 +128,9 @@ class _DiffusionBase(nn.Module, ABC):
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """DDPM reverse loop. cond is z (HybridModel) or x_rep (DiffPO). Returns (BK,2).
 
+        For HybridModel the z here is a stochastic encoder draw, unlike the deterministic
+        posterior mean that self.encode_cond / sample_ddim use.
+
         When log_trajectory=True, returns (y, y_traj, eps_traj) instead: y is (BK,2) as
         above, and y_traj/eps_traj are each (L,BK,2), logging the state entering each step
         and the denoiser's predicted noise there, in step order from tau=L-1 down to tau=0.
@@ -182,6 +193,8 @@ class _DiffusionBase(nn.Module, ABC):
         log_trajectory: bool = False,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Deterministic (eta=0) DDIM reverse loop. cond is z (HybridModel) or x_rep (DiffPO).
+        Via sample_ddim, cond is what self.encode_cond(x, a) returns -- x for DiffPO, the
+        encoder posterior mean for HybridModel.
         See https://arxiv.org/abs/2010.02502 for details.
 
         y_init, if given, is used as the starting noise y_L instead of a fresh torch.randn
@@ -220,6 +233,29 @@ class _DiffusionBase(nn.Module, ABC):
         if log_trajectory:
             return y, torch.stack(y_traj, dim=0), torch.stack(eps_traj, dim=0)
         return y
+
+    @torch.no_grad()
+    def sample_ddim(
+        self,
+        x: torch.Tensor,
+        a: torch.Tensor,
+        y_init: torch.Tensor | None = None,
+        clip_val: float | None = None,
+        log_trajectory: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Deterministic DDIM sample, one trajectory per subject. Returns y (B,2), or
+        (y, y_traj, eps_traj) each (L,B,2) when log_trajectory=True. Conditioning comes from
+        self.encode_cond (x for DiffPO, encoder posterior mean for HybridModel)."""
+        B, device = x.shape[0], x.device
+        return self._ddim_reverse(
+            B,
+            self.encode_cond(x, a),
+            a,
+            device,
+            y_init=y_init,
+            clip_val=clip_val,
+            log_trajectory=log_trajectory,
+        )
 
 
 class HybridModel(_DiffusionBase):
@@ -414,6 +450,17 @@ class HybridModel(_DiffusionBase):
         y = self._ddpm_reverse(BK, z, a_rep, device, clip_val).reshape(B, K, 2)
         return y[:, :, 0], y[:, :, 1]
 
+    @torch.no_grad()
+    def encode_cond(self, x: torch.Tensor, a: torch.Tensor) -> torch.Tensor:
+        """Encoder posterior mean mu_phi(x, a, y_hat), y_hat imputed by aux_outcome.mean.
+
+        Deterministic -- no reparameterisation draw. Used by the confounding-diffusion
+        analysis; sample_outcomes still uses the stochastic encoder.rsample path.
+        """
+        y_hat = self.aux_outcome.mean(x, a)
+        mu, _ = self.encoder.forward(x, a, y_hat)
+        return mu
+
 
 class DiffPO(_DiffusionBase):
     """
@@ -490,18 +537,6 @@ class DiffPO(_DiffusionBase):
         return y[:, :, 0], y[:, :, 1]
 
     @torch.no_grad()
-    def sample_ddim(
-        self,
-        x: torch.Tensor,
-        a: torch.Tensor,
-        y_init: torch.Tensor | None = None,
-        clip_val: float | None = None,
-        log_trajectory: bool = False,
-    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Deterministic DDIM sample, one trajectory per subject. Returns y (B,2), or
-        (y, y_traj, eps_traj) when log_trajectory=True -- y is (B,2), y_traj/eps_traj are
-        each (L,B,2). See _ddim_reverse."""
-        B, device = x.shape[0], x.device
-        return self._ddim_reverse(
-            B, x, a, device, y_init=y_init, clip_val=clip_val, log_trajectory=log_trajectory
-        )
+    def encode_cond(self, x: torch.Tensor, a: torch.Tensor) -> torch.Tensor:
+        """DiffPO conditions the denoiser on x directly."""
+        return x

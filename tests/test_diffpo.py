@@ -153,3 +153,24 @@ def test_sample_ddim_log_trajectory_shapes():
     assert y_traj.shape == (DIFF_CFG.num_steps, B, 2)
     assert eps_traj.shape == (DIFF_CFG.num_steps, B, 2)
     assert torch.isfinite(y).all()
+
+
+def test_encode_cond_returns_x_for_diffpo():
+    model = DiffPO(VAE_CFG, DIFF_CFG)
+    model.eval()
+    x = torch.randn(B, F)
+    a = torch.randint(0, 2, (B,)).float()
+    assert torch.equal(model.encode_cond(x, a), x)
+
+
+def test_sample_ddim_matches_ddim_reverse_on_x():
+    """After moving sample_ddim to _DiffusionBase, DiffPO.sample_ddim must still be
+    exactly _ddim_reverse(B, x, a, ...) -- encode_cond returns x, so behaviour is unchanged."""
+    model = DiffPO(VAE_CFG, DIFF_CFG)
+    model.eval()
+    x = torch.randn(B, F)
+    a = torch.randint(0, 2, (B,)).float()
+    y_init = torch.randn(B, 2)
+    direct = model._ddim_reverse(B, x, a, torch.device("cpu"), y_init=y_init)
+    viawrap = model.sample_ddim(x, a, y_init=y_init)
+    assert torch.equal(direct, viawrap)
