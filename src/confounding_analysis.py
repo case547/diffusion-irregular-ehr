@@ -49,7 +49,7 @@ def divergence_ratio(
     )
 
 
-def boot_curve(values: np.ndarray, n_boot: int, rng: np.random.Generator) -> np.ndarray:
+def bootstrap_curve(values: np.ndarray, n_boot: int, rng: np.random.Generator) -> np.ndarray:
     """Bootstrap the per-tau mean of `values` (L, n) over its n subjects.
 
     Resamples subjects with replacement; returns (L, n_boot). The explicit loop keeps
