@@ -9,7 +9,7 @@ vae:
   a_decoder_label_smoothing: 0.0  # label smoothing for a_decoder, 0.0 = no smoothing; must be in [0, 0.5)
 
 diffusion:
-  num_steps: 200       # L diffusion steps
+  num_steps: 200  # L diffusion steps
   beta_start: 0.0001
   beta_end: 0.1
   schedule: quad     # quadratic; DiffPO default for tabular PO data
@@ -23,7 +23,7 @@ diffusion:
   ipw_ramp_start: 100  # number of epochs to wait before starting IPW ramping
   ipw_ramp_end: 150    # number of epochs to reach full IPW weighting
   ipw_clip_prop: 0.1   # clip IPW weights to 1/ipw_prop_clip
-  ipw_z_samples: 5     # number of z samples to use for IPW weighting (per subject, per )
+  ipw_z_samples: 5     # number of z samples to use for IPW weighting (per subject, per epoch)
 
 train:
   epochs: 500

@@ -35,9 +35,18 @@ def cross_evaluate(
 
 def divergence_ratio(
     div_norm: torch.Tensor, eps_norm: torch.Tensor, mask: torch.Tensor | slice
-) -> float:
-    """mean ||d_tau|| / mean ||eps_theta|| over the (tau, subject) entries selected by mask."""
-    return (div_norm[:, mask].mean() / eps_norm[:, mask].mean()).item()
+) -> tuple[float, float, float]:
+    """mean ||d_tau||,  mean ||eps_theta||, and their ratio.
+
+    This is computed over the (tau, subject) entries selected by mask.
+    """
+    div_norm_mean = div_norm[:, mask].mean()
+    eps_norm_mean = eps_norm[:, mask].mean()
+    return (
+        div_norm_mean.item(),
+        eps_norm_mean.item(),
+        (div_norm_mean / eps_norm_mean).item(),
+    )
 
 
 def boot_curve(values: np.ndarray, n_boot: int, rng: np.random.Generator) -> np.ndarray:
@@ -55,4 +64,5 @@ def boot_curve(values: np.ndarray, n_boot: int, rng: np.random.Generator) -> np.
 
 def pointwise_ci(boot: np.ndarray, alpha: float = 0.05) -> tuple[np.ndarray, np.ndarray]:
     """(lo, hi) percentile band from a (L, n_boot) bootstrap array."""
-    return np.percentile(boot, [100 * alpha / 2, 100 * (1 - alpha / 2)], axis=1)
+    lo, hi = np.percentile(boot, [100 * alpha / 2, 100 * (1 - alpha / 2)], axis=1)
+    return lo, hi
