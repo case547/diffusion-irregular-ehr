@@ -28,9 +28,16 @@ class DiffusionConfig(BaseModel):
     ipw_ramp_end: int = 0
     ipw_clip_prop: float = 0.1
     ipw_z_samples: int = 1
+    use_dr_blend: bool = False
 
     @model_validator(mode="after")
     def _validate_ipw_fields(self) -> DiffusionConfig:
+        if self.use_dr_blend:
+            assert self.use_ipw, (
+                "use_dr_blend=True requires use_ipw=True -- the DR blend only ever "
+                "activates inside the same ipw_active gate as the single-term "
+                "reweighting path"
+            )
         if self.use_ipw:
             assert self.ipw_ramp_end > self.ipw_ramp_start, (
                 "ipw_ramp_end must be > ipw_ramp_start when use_ipw=True"
