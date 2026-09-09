@@ -4,7 +4,7 @@ import torch
 
 from src.config import DiffusionConfig, VAEConfig
 from src.confounding_analysis import (
-    boot_curve,
+    bootstrap_curve,
     cross_evaluate,
     divergence_ratio,
     pointwise_ci,
@@ -78,7 +78,7 @@ def test_divergence_ratio_matches_manual():
 
 def test_boot_curve_and_pointwise_ci_shapes():
     values = np.random.default_rng(0).normal(size=(L, 7))
-    boot = boot_curve(values, n_boot=50, rng=np.random.default_rng(1))
+    boot = bootstrap_curve(values, n_boot=50, rng=np.random.default_rng(1))
     assert boot.shape == (L, 50)
     lo, hi = pointwise_ci(boot)
     assert lo.shape == (L,) and hi.shape == (L,)
