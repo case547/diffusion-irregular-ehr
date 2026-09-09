@@ -9,6 +9,7 @@ from torch.optim import Adam
 from torch.utils.data import DataLoader
 
 import src.model as model_module
+import train as train_module
 from src.auxiliary import AuxOutcome
 from src.config import Config, DataConfig, DiffusionConfig, TrainConfig, VAEConfig
 from src.data import CausalDataset
@@ -662,3 +663,91 @@ def test_use_ipw_true_changes_trained_weights_vs_false(tmp_path):
         "the state_dict divergence above could be explained by RNG consumption alone, "
         "not by the weighting actually reaching the loss"
     )
+
+
+def test_log_ipw_diagnostics_uses_dr_blend_kwargs_when_active():
+    """_log_ipw_diagnostics must call zspace_ipw_weight with trim_to_zero=True,
+    normalize=False when model._use_dr_blend is True -- mirroring compute_loss's own
+    branch, so the diagnostics reflect whichever mode is actually driving the loss.
+    Spy on train.py's own module-level import of zspace_ipw_weight (distinct from
+    src.model's separate import used inside compute_loss)."""
+    from ema_pytorch import EMA
+
+    from train import _log_ipw_diagnostics
+
+    torch.manual_seed(12)
+    diff_cfg = DiffusionConfig(
+        num_steps=10,
+        beta_start=0.0001,
+        beta_end=0.02,
+        schedule="quad",
+        embedding_dim=16,
+        block_dim=16,
+        hidden_dim=32,
+        num_blocks=2,
+        use_ipw=True,
+        ipw_ramp_start=0,
+        ipw_ramp_end=1,
+        ipw_z_samples=2,
+        use_dr_blend=True,
+    )
+    model = HybridModel(VAE_CFG, diff_cfg)
+    ema_a_decoder = EMA(model.a_decoder, beta=0.9, update_after_step=0, update_every=1)
+    ema_encoder = EMA(model.encoder, beta=0.9, update_after_step=0, update_every=1)
+    ema_a_decoder.update()
+    ema_encoder.update()
+
+    loader = _loader(n=32, batch_size=16)
+
+    original_weight_fn = train_module.zspace_ipw_weight
+    captured_kwargs = []
+
+    def weight_spy(pi_hat, a, clip_prop, **kwargs):
+        captured_kwargs.append(kwargs)
+        return original_weight_fn(pi_hat, a, clip_prop, **kwargs)
+
+    train_module.zspace_ipw_weight = weight_spy
+    try:
+        device = torch.device("cpu")
+        _log_ipw_diagnostics(model, loader, device, ema_a_decoder, ema_encoder)
+    finally:
+        train_module.zspace_ipw_weight = original_weight_fn
+
+    assert len(captured_kwargs) == 1
+    assert captured_kwargs[0] == {"trim_to_zero": True, "normalize": False}
+
+
+def test_log_ipw_diagnostics_uses_single_term_kwargs_when_dr_blend_false():
+    """model._use_dr_blend=False (default) must call zspace_ipw_weight with today's
+    exact defaults (trim_to_zero=False, normalize=True) -- regression guard."""
+    from ema_pytorch import EMA
+
+    from train import _log_ipw_diagnostics
+
+    torch.manual_seed(13)
+    model = HybridModel(VAE_CFG, DIFF_CFG)  # use_ipw/use_dr_blend both default to False,
+    # but _log_ipw_diagnostics doesn't itself check use_ipw -- it's only ever called by
+    # _train_loop when ipw_model is not None, so construct EMA objects directly here
+    ema_a_decoder = EMA(model.a_decoder, beta=0.9, update_after_step=0, update_every=1)
+    ema_encoder = EMA(model.encoder, beta=0.9, update_after_step=0, update_every=1)
+    ema_a_decoder.update()
+    ema_encoder.update()
+
+    loader = _loader(n=32, batch_size=16)
+
+    original_weight_fn = train_module.zspace_ipw_weight
+    captured_kwargs = []
+
+    def weight_spy(pi_hat, a, clip_prop, **kwargs):
+        captured_kwargs.append(kwargs)
+        return original_weight_fn(pi_hat, a, clip_prop, **kwargs)
+
+    train_module.zspace_ipw_weight = weight_spy
+    try:
+        device = torch.device("cpu")
+        _log_ipw_diagnostics(model, loader, device, ema_a_decoder, ema_encoder)
+    finally:
+        train_module.zspace_ipw_weight = original_weight_fn
+
+    assert len(captured_kwargs) == 1
+    assert captured_kwargs[0] == {"trim_to_zero": False, "normalize": True}

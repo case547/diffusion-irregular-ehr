@@ -96,10 +96,17 @@ def _log_ipw_diagnostics(
 
     pi_hat_all = torch.cat(all_pi_hat)
     a_all = torch.cat(all_a)
-    # Read the clip threshold off the model itself (single source of truth) rather
-    # than separately from cfg.diffusion.ipw_clip_prop -- the two happen to always
-    # agree in practice but weren't enforced to.
-    w = zspace_ipw_weight(pi_hat_all, a_all, model._ipw_clip_prop)
+    # Read the clip threshold (and DR-blend mode) off the model itself (single source
+    # of truth) rather than separately from cfg.diffusion -- these happen to always
+    # agree in practice but weren't enforced to. Mirrors compute_loss's own branch so
+    # the diagnostics reflect whichever mode is actually driving that epoch's loss.
+    w = zspace_ipw_weight(
+        pi_hat_all,
+        a_all,
+        model._ipw_clip_prop,
+        trim_to_zero=model._use_dr_blend,
+        normalize=not model._use_dr_blend,
+    )
     ess = effective_sample_size(w)
 
     out = {"ess": ess, "ess_frac": ess / len(w)}
