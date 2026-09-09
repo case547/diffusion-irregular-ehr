@@ -93,6 +93,21 @@ class _DiffusionBase(nn.Module, ABC):
             [y_fac * (1 - a) + y_cf * a, y_fac * a + y_cf * (1 - a)], dim=1
         )  # (B,2)
 
+    def _apply_noise(
+        self,
+        y_both: torch.Tensor,
+        tau: torch.Tensor,
+        eps: torch.Tensor,
+    ) -> torch.Tensor:
+        """The noise-mixing arithmetic factored out of `_noise_targets`.
+
+        This is needed so that a second forward pass (e.g. the doubly-robust
+        blend's plug-in pass) can reuse the exact same (tau, eps) draw against
+        a different `y_both`.
+        """
+        ab_tau = self.alpha_bar_sched[tau].unsqueeze(1)  # (B,1)
+        return ab_tau.sqrt() * y_both + (1.0 - ab_tau).sqrt() * eps
+
     def _noise_targets(
         self,
         batch_size: int,
@@ -112,8 +127,7 @@ class _DiffusionBase(nn.Module, ABC):
 
         tau = torch.randint(0, self.L, (B,), device=device)
         eps = torch.randn(B, 2, device=device)
-        ab_tau = self.alpha_bar_sched[tau].unsqueeze(1)  # (B,1)
-        noisy_y = ab_tau.sqrt() * y_both + (1.0 - ab_tau).sqrt() * eps
+        noisy_y = self._apply_noise(y_both, tau, eps)
 
         return noisy_y, tau, eps, factual_mask
 

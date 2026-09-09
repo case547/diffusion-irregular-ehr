@@ -498,3 +498,17 @@ def test_compute_loss_falls_back_to_unweighted_when_use_ipw_false():
         ((captured["eps_pred"] - captured["eps"]) * captured["factual_mask"]) ** 2
     ).sum(dim=1)
     assert torch.allclose(comps["diffusion_loss"], per_sample.mean())
+
+
+def test_apply_noise_matches_manual_formula():
+    model = HybridModel(VAE_CFG, DIFF_CFG)
+    torch.manual_seed(0)
+    y_both = torch.randn(B, 2)
+    tau = torch.randint(0, model.L, (B,))
+    eps = torch.randn(B, 2)
+
+    noisy_y = model._apply_noise(y_both, tau, eps)
+
+    ab_tau = model.alpha_bar_sched[tau].unsqueeze(1)
+    expected = ab_tau.sqrt() * y_both + (1.0 - ab_tau).sqrt() * eps
+    assert torch.allclose(noisy_y, expected)
