@@ -126,3 +126,20 @@ def test_calibration_diagnostic_returns_all_bins_when_not_evenly_divisible():
         assert f"calib_bin{i}_pred" in out
         assert f"calib_bin{i}_empirical" in out
     assert "calib_mae" in out
+
+
+def test_zspace_ipw_weight_trim_to_zero_option():
+    # subject 0: treated, p_hat=0.02 -> trimmed; subject 1: untreated, p_hat=0.5 -> not trimmed
+    p_hat = torch.tensor([0.02, 0.5])
+    a = torch.tensor([1.0, 0.0])
+    w = zspace_ipw_weight(p_hat, a, clip_prop=0.1, trim_to_zero=True, normalize=False)
+    assert torch.allclose(w, torch.tensor([0.0, 2.0]))
+
+
+def test_zspace_ipw_weight_normalize_false_keeps_raw_scale():
+    p_hat = torch.tensor([0.5, 0.3, 0.7, 0.4])
+    a = torch.tensor([1.0, 0.0, 1.0, 0.0])
+    w = zspace_ipw_weight(p_hat, a, clip_prop=0.1, normalize=False)
+    raw = a / p_hat + (1 - a) / (1 - p_hat)
+    assert torch.allclose(w, raw)
+    assert not torch.allclose(w.mean(), torch.tensor(1.0))  # NOT renormalised
