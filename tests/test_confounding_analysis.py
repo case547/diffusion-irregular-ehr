@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 import torch
 
 from src.config import DiffusionConfig, VAEConfig
@@ -8,7 +9,7 @@ from src.confounding_analysis import (
     divergence_ratio,
     pointwise_ci,
 )
-from src.model import DiffPO
+from src.model import DiffPO, HybridModel
 
 VAE_CFG = VAEConfig(
     feature_dim=5,
@@ -32,32 +33,36 @@ DIFF_CFG = DiffusionConfig(
 L, N, F = DIFF_CFG.num_steps, 4, 5
 
 
-def _model_and_traj():
-    model = DiffPO(VAE_CFG, DIFF_CFG)
+def _model_and_traj(model_cls):
+    model = model_cls(VAE_CFG, DIFF_CFG)
+    model.eval()  # HybridModel.encode_cond routes through aux/encoder nets
     x = torch.randn(N, F)
     a = torch.randint(0, 2, (N,)).float()
     _, y_traj, eps_traj = model.sample_ddim(x, a, log_trajectory=True)
     return model, x, a, y_traj, eps_traj
 
 
-def test_cross_evaluate_shape():
-    model, x, a, y_traj, _ = _model_and_traj()
+@pytest.mark.parametrize("model_cls", [DiffPO, HybridModel])
+def test_cross_evaluate_shape(model_cls):
+    model, x, a, y_traj, _ = _model_and_traj(model_cls)
     out = cross_evaluate(model, y_traj, model.encode_cond(x, a), a)
     assert out.shape == (L, N, 2)
 
 
-def test_cross_evaluate_deterministic():
-    model, x, a, y_traj, _ = _model_and_traj()
+@pytest.mark.parametrize("model_cls", [DiffPO, HybridModel])
+def test_cross_evaluate_deterministic(model_cls):
+    model, x, a, y_traj, _ = _model_and_traj(model_cls)
     cond = model.encode_cond(x, a)
     assert torch.equal(
         cross_evaluate(model, y_traj, cond, a), cross_evaluate(model, y_traj, cond, a)
     )
 
 
-def test_cross_evaluate_reproduces_own_eps_on_own_trajectory():
+@pytest.mark.parametrize("model_cls", [DiffPO, HybridModel])
+def test_cross_evaluate_reproduces_own_eps_on_own_trajectory(model_cls):
     """A model cross-evaluated on its own logged trajectory with its own conditioning
     must reproduce its own logged predicted noise (up to float error)."""
-    model, x, a, y_traj, eps_traj = _model_and_traj()
+    model, x, a, y_traj, eps_traj = _model_and_traj(model_cls)
     out = cross_evaluate(model, y_traj, model.encode_cond(x, a), a)
     assert torch.allclose(out, eps_traj, atol=1e-5)
 
@@ -67,7 +72,8 @@ def test_divergence_ratio_matches_manual():
     eps = torch.rand(L, N) + 0.5
     mask = torch.tensor([True, False, True, False])
     expected = (div[:, mask].mean() / eps[:, mask].mean()).item()
-    assert divergence_ratio(div, eps, mask) == expected
+    _, _, ratio = divergence_ratio(div, eps, mask)
+    assert ratio == expected
 
 
 def test_boot_curve_and_pointwise_ci_shapes():

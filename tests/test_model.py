@@ -88,6 +88,8 @@ def test_encode_cond_shape_and_deterministic():
     assert c1.shape == (B, VAE_CFG.latent_dim)
     assert torch.equal(c1, c2)  # posterior mean -- no randn
     assert torch.isfinite(c1).all()
+    mu_ref, _ = model.encoder.forward(x, a, model.aux_outcome.mean(x, a))
+    assert torch.equal(c1, mu_ref)
 
 
 def test_sample_ddim_shapes_and_shared_y_init():
