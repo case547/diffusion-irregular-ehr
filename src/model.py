@@ -323,6 +323,7 @@ class HybridModel(_DiffusionBase):
         self._ipw_ramp_end = diffusion_cfg.ipw_ramp_end
         self._ipw_clip_prop = diffusion_cfg.ipw_clip_prop
         self._ipw_z_samples = diffusion_cfg.ipw_z_samples
+        self._use_dr_blend = diffusion_cfg.use_dr_blend
 
     def _apply_cf_anchor(
         self, x: torch.Tensor, a: torch.Tensor, y_cf: torch.Tensor
@@ -420,9 +421,33 @@ class HybridModel(_DiffusionBase):
             and epoch >= self._ipw_ramp_start
         ):
             pi_hat = self._compute_pi_hat(x, a, y_fac, ema_encoder, ema_a_decoder)
-            w = zspace_ipw_weight(pi_hat, a, self._ipw_clip_prop)
-            w_eff = ramp_weight(w, epoch, self._ipw_ramp_start, self._ipw_ramp_end)
-            diffusion_loss = (per_sample * w_eff).mean()
+
+            if self._use_dr_blend:
+                w = zspace_ipw_weight(
+                    pi_hat, a, self._ipw_clip_prop, trim_to_zero=True, normalize=False
+                )
+                w_eff = ramp_weight(w, epoch, self._ipw_ramp_start, self._ipw_ramp_end)
+
+                # Plug-in for the subject's OWN arm
+                with torch.no_grad():
+                    y_fac_pseudo = self.aux_outcome.mean(x, a)
+                y_both_pseudo = self._assemble_yboth(a, y_fac_pseudo, cf_target)
+                # SAME tau/eps as real pass
+                noisy_y_pseudo = self._apply_noise(y_both_pseudo, tau, eps)
+                eps_pred_pseudo: torch.Tensor = self.denoiser(noisy_y_pseudo, tau, z, a)
+                per_sample_pseudo = (((eps_pred_pseudo - eps) * gradient_mask) ** 2).sum(dim=1)
+
+                # AIPW-shaped correction, not a 0-1 blend: w_eff can exceed 1 (unnormalised,
+                # up to ~1/clip_prop), making (1-w_eff) negative for some subjects -- this is
+                # the actual AIPW estimator structure (ipw*y + (1-ipw)*mu, from
+                # (a/pi)*(y-mu)+mu expanded), not a bug.
+                diffusion_loss = (
+                    w_eff * per_sample + (1.0 - w_eff) * per_sample_pseudo
+                ).mean()
+            else:
+                w = zspace_ipw_weight(pi_hat, a, self._ipw_clip_prop)
+                w_eff = ramp_weight(w, epoch, self._ipw_ramp_start, self._ipw_ramp_end)
+                diffusion_loss = (per_sample * w_eff).mean()
         else:
             diffusion_loss = per_sample.mean()
 
