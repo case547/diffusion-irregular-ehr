@@ -40,7 +40,9 @@ def run_condition(
     model = model_cls(cfg.vae, cfg.diffusion).to(device)
     Path(cfg.train.checkpoint_dir).mkdir(parents=True, exist_ok=True)
 
-    if isinstance(model, HybridModel) and cfg.diffusion.cf_anchor_weight > 0.0:
+    if isinstance(model, HybridModel) and (
+        cfg.diffusion.cf_anchor_weight > 0.0 or cfg.diffusion.use_dr_blend
+    ):
         # Tag pretraining's own (independently-numbered) epoch counter with its own
         # step key so it doesn't collide with _train_loop's "train/step" below.
         pretrain_log_fn = (

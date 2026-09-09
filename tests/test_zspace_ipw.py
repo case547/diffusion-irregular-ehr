@@ -94,6 +94,11 @@ def test_effective_sample_size_drops_with_one_dominant_weight():
     assert ess < 5.0  # one large weight collapses ESS well below n=10
 
 
+def test_effective_sample_size_zero_when_all_weights_zero():
+    w = torch.zeros(10)
+    assert effective_sample_size(w) == 0.0
+
+
 def test_calibration_diagnostic_perfect_calibration():
     # 10 subjects, p_hat exactly matches treatment status within each singleton bin
     p_hat = torch.tensor([0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0])

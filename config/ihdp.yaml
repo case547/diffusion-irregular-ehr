@@ -24,6 +24,7 @@ diffusion:
   ipw_ramp_end: 150    # number of epochs to reach full IPW weighting
   ipw_clip_prop: 0.1   # clip IPW weights to 1/ipw_prop_clip
   ipw_z_samples: 5     # number of z samples to use for IPW weighting (per subject, per )
+  use_dr_blend: False   # doubly-robust blend variant of z-space IPW; requires use_ipw=True
 
 train:
   epochs: 500
