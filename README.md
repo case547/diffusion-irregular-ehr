@@ -1,1 +1,1 @@
-# Causally-Consistent Diffusion Models for Irregular EHR Time Series and Counterfactual Trajectories
+# Causally-Consistent Diffusion Models for Treatment Effect Estimation Under Latent Confounding
